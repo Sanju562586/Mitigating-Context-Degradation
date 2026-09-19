@@ -1,0 +1,181 @@
+"use client";
+
+import React, { useCallback, useEffect, useState } from "react";
+import { Navbar } from "@/components/Navbar";
+import { UploadZone } from "@/components/UploadZone";
+import { DocumentList } from "@/components/DocumentList";
+import { DocumentInspector } from "@/components/DocumentInspector";
+import {
+  checkHealth,
+  deleteDocumentById,
+  fetchDocumentById,
+  fetchDocuments,
+} from "@/lib/api";
+import { Document, DocumentMetadata, HealthStatus } from "@/types/ingestion";
+import { Sparkles, BookCheck } from "lucide-react";
+
+export default function IngestionPage() {
+  const [backendHealth, setBackendHealth] = useState<HealthStatus | null>(null);
+  const [healthError, setHealthError] = useState(false);
+  const [documents, setDocuments] = useState<DocumentMetadata[]>([]);
+  const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
+  const [selectedDoc, setSelectedDoc] = useState<Document | null>(null);
+  const [isLoadingDocs, setIsLoadingDocs] = useState(false);
+  const [isLoadingSelected, setIsLoadingSelected] = useState(false);
+
+  // Poll / check backend health & initial docs
+  const loadHealthAndDocs = useCallback(async () => {
+    try {
+      const health = await checkHealth();
+      setBackendHealth(health);
+      setHealthError(false);
+    } catch {
+      setHealthError(true);
+      setBackendHealth(null);
+    }
+
+    try {
+      setIsLoadingDocs(true);
+      const docs = await fetchDocuments();
+      setDocuments(docs);
+      if (docs.length > 0 && !selectedDocId) {
+        setSelectedDocId(docs[0].document_id);
+      }
+    } catch {
+      // Backend may not be reachable initially
+    } finally {
+      setIsLoadingDocs(false);
+    }
+  }, [selectedDocId]);
+
+  useEffect(() => {
+    loadHealthAndDocs();
+    const interval = setInterval(() => {
+      checkHealth()
+        .then((h) => {
+          setBackendHealth(h);
+          setHealthError(false);
+        })
+        .catch(() => {
+          setBackendHealth(null);
+          setHealthError(true);
+        });
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [loadHealthAndDocs]);
+
+  // Fetch full document when selectedDocId changes
+  useEffect(() => {
+    if (!selectedDocId) {
+      setSelectedDoc(null);
+      return;
+    }
+
+    let isMounted = true;
+    setIsLoadingSelected(true);
+    fetchDocumentById(selectedDocId)
+      .then((doc) => {
+        if (isMounted) setSelectedDoc(doc);
+      })
+      .catch((err) => {
+        console.error(err);
+      })
+      .finally(() => {
+        if (isMounted) setIsLoadingSelected(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedDocId]);
+
+  const handleIngestSuccess = (doc: Document) => {
+    setDocuments((prev) => [doc.metadata, ...prev.filter((d) => d.document_id !== doc.id)]);
+    setSelectedDocId(doc.id);
+    setSelectedDoc(doc);
+  };
+
+  const handleDeleteDocument = async (docId: string) => {
+    try {
+      await deleteDocumentById(docId);
+      setDocuments((prev) => prev.filter((d) => d.document_id !== docId));
+      if (selectedDocId === docId) {
+        const remaining = documents.filter((d) => d.document_id !== docId);
+        if (remaining.length > 0) {
+          setSelectedDocId(remaining[0].document_id);
+        } else {
+          setSelectedDocId(null);
+          setSelectedDoc(null);
+        }
+      }
+    } catch (err) {
+      alert("Failed to delete document: " + err);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-indigo-500/30">
+      {/* Top Navbar */}
+      <Navbar backendHealth={backendHealth} healthError={healthError} />
+
+      {/* Main Content Area */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-8 space-y-8">
+        {/* Page Hero Header */}
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-slate-900 pb-6">
+          <div>
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-semibold mb-3">
+              <Sparkles className="h-3.5 w-3.5" />
+              Stage 1: Multi-Format Document Ingestion Engine
+            </div>
+            <h1 className="text-3xl font-extrabold tracking-tight text-white sm:text-4xl">
+              Document Ingestion & Unified Schema
+            </h1>
+            <p className="mt-2 text-sm text-slate-400 max-w-2xl leading-relaxed">
+              Upload PDF, DOCX, TXT, MD, or HTML files. The ingestion engine standardizes
+              heterogeneous documents, tracking structural metadata: chunks generated,
+              page boundaries, block composition, and the canonical <code className="text-indigo-300 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">Document</code> schema.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="px-4 py-2.5 bg-slate-900/90 border border-slate-800 rounded-xl text-xs text-slate-300 flex items-center gap-2">
+              <BookCheck className="h-4 w-4 text-emerald-400" />
+              <span>Standard: Common Document Object v1.0</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Upload Zone */}
+        <UploadZone onIngestSuccess={handleIngestSuccess} />
+
+        {/* Repository & Deep Inspector Split View */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* Document List Sidebar (4 cols) */}
+          <div className="lg:col-span-4">
+            <DocumentList
+              documents={documents}
+              selectedDocId={selectedDocId}
+              onSelectDocument={setSelectedDocId}
+              onDeleteDocument={handleDeleteDocument}
+              onRefresh={loadHealthAndDocs}
+              isLoading={isLoadingDocs}
+            />
+          </div>
+
+          {/* Deep Document Inspector (8 cols) */}
+          <div className="lg:col-span-8">
+            <DocumentInspector
+              document={selectedDoc}
+              isLoading={isLoadingSelected}
+            />
+          </div>
+        </div>
+      </main>
+
+      {/* Footer */}
+      <footer className="border-t border-slate-900 bg-slate-950/60 py-5 text-center text-xs text-slate-500">
+        <p>Mitigating Hallucination and Context Degradation in LLMs • Major Project</p>
+      </footer>
+    </div>
+  );
+}
