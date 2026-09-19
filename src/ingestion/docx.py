@@ -106,6 +106,11 @@ class DocxParser(BaseParser):
 
         full_content = "\n\n".join(full_text_blocks)
 
+        if "document_type" in kwargs and kwargs["document_type"]:
+            docx_metadata["document_type"] = kwargs["document_type"]
+        if "extra_metadata" in kwargs and isinstance(kwargs["extra_metadata"], dict):
+            docx_metadata.update(kwargs["extra_metadata"])
+
         return Document.create(
             source_name=filename,
             file_type=DocumentType.DOCX,

@@ -6,7 +6,7 @@ from typing import List, Optional
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 
-from src.ingestion.models import Document, DocumentMetadata, DocumentType
+from src.ingestion.models import Document, DocumentChunk, DocumentMetadata, DocumentType
 from src.ingestion.registry import UnsupportedFormatError, default_registry
 from src.ingestion.store import default_store
 
@@ -18,6 +18,9 @@ class RawTextInput(BaseModel):
     title: str = Field(default="untitled.txt", description="Document title or pseudo-filename")
     content: str = Field(..., description="Raw text or markdown content")
     format: str = Field(default="txt", description="Format: 'txt', 'md', or 'html'")
+    document_type: Optional[str] = Field(
+        default=None, description="Optional explicit document type category (e.g. HR_POLICY, TECHNICAL_SPEC)"
+    )
 
 
 class IngestResponse(BaseModel):
@@ -29,7 +32,8 @@ class IngestResponse(BaseModel):
 
 @router.post("/upload", response_model=IngestResponse, status_code=status.HTTP_201_CREATED)
 async def upload_document(
-    file: UploadFile = File(..., description="Document file to parse (PDF, DOCX, TXT, MD, HTML)")
+    file: UploadFile = File(..., description="Document file to parse (PDF, DOCX, TXT, MD, HTML)"),
+    document_type: Optional[str] = Form(None, description="Optional explicit document type (e.g. HR_POLICY)"),
 ) -> IngestResponse:
     """Upload and parse any supported document into the standardized Document format."""
     filename = file.filename or "uploaded_document"
@@ -47,6 +51,7 @@ async def upload_document(
             filename=filename,
             mime_type=file.content_type,
             file_size_bytes=len(content_bytes),
+            document_type=document_type,
         )
         default_store.add(doc)
 
@@ -88,6 +93,7 @@ def ingest_text(payload: RawTextInput) -> IngestResponse:
             content=content_bytes,
             filename=filename,
             file_size_bytes=len(content_bytes),
+            document_type=payload.document_type,
         )
         default_store.add(doc)
 
@@ -119,6 +125,18 @@ def get_document(doc_id: str) -> Document:
             detail=f"Document '{doc_id}' not found.",
         )
     return doc
+
+
+@router.get("/documents/{doc_id}/chunks", response_model=List[DocumentChunk])
+def get_document_chunks(doc_id: str) -> List[DocumentChunk]:
+    """Retrieve all semantic chunks and tagged metadata for a specific document."""
+    doc = default_store.get(doc_id)
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document '{doc_id}' not found.",
+        )
+    return doc.chunks
 
 
 @router.delete("/documents/{doc_id}")

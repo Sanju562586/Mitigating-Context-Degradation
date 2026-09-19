@@ -77,6 +77,7 @@ class DocumentChunk(BaseModel):
     content: str = Field(..., description="Text content of the chunk")
     char_count: int = Field(default=0, description="Character count of chunk")
     word_count: int = Field(default=0, description="Word count of chunk")
+    token_count: int = Field(default=0, description="Token count of chunk")
     page_numbers: List[int] = Field(
         default_factory=list, description="Pages spanned by this chunk"
     )
@@ -92,6 +93,9 @@ class DocumentChunk(BaseModel):
             object.__setattr__(self, "char_count", len(self.content))
         if not self.word_count and self.content:
             object.__setattr__(self, "word_count", len(self.content.split()))
+        if not self.token_count and self.content:
+            from src.chunking.tokenizer import count_tokens
+            object.__setattr__(self, "token_count", count_tokens(self.content))
 
 
 class DocumentMetadata(BaseModel):
@@ -148,12 +152,20 @@ class Document(BaseModel):
         raw_content: Optional[str] = None,
         page_count: Optional[int] = None,
     ) -> Document:
-        """Factory method to construct a canonical Document with automatic hashes and stats."""
-        # Consolidate text content
+        """Factory method to construct a canonical Document with cleaning and semantic chunking."""
+        from src.cleaning.cleaner import default_cleaner
+        from src.chunking.semantic import default_semantic_chunker
+
+        # 1. Clean elements (removes duplicate headers, page numbers, broken line breaks, irrelevant symbols, repeated footers)
+        cleaned_elements = default_cleaner.clean_elements(elements)
+
+        # 2. Consolidate and clean text content
         if raw_content is not None:
-            full_text = raw_content.strip()
+            full_text = default_cleaner.clean_text(raw_content)
         else:
-            full_text = "\n\n".join(el.content.strip() for el in elements if el.content.strip()).strip()
+            full_text = "\n\n".join(
+                el.content.strip() for el in cleaned_elements if el.content.strip()
+            ).strip()
 
         # Compute deterministic content hash
         content_hash = hashlib.sha256(full_text.encode("utf-8")).hexdigest()
@@ -161,7 +173,7 @@ class Document(BaseModel):
 
         # Fix element IDs to reference doc_id if not already done
         updated_elements = []
-        for idx, el in enumerate(elements):
+        for idx, el in enumerate(cleaned_elements):
             el_id = el.id if el.id and not el.id.startswith("temp_") else f"{doc_id}_el_{idx}"
             updated_elements.append(
                 DocumentElement(
@@ -176,11 +188,15 @@ class Document(BaseModel):
                 )
             )
 
-        # Generate standardized chunks from elements
-        from src.ingestion.chunker import default_chunker
-
-        doc_chunks = default_chunker.chunk_elements(
-            doc_id=doc_id, elements=updated_elements, raw_text=full_text
+        # 3. Generate semantic chunks with 50-token overlap and rich metadata
+        explicit_type = extra_metadata.get("document_type") if extra_metadata else None
+        doc_chunks = default_semantic_chunker.chunk_elements(
+            doc_id=doc_id,
+            elements=updated_elements,
+            source_name=source_name,
+            document_type=explicit_type,
+            raw_text=full_text,
+            extra_metadata=extra_metadata,
         )
 
         char_count = len(full_text)

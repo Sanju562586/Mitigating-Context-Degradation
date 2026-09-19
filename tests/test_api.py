@@ -84,3 +84,26 @@ def test_list_and_get_and_delete_documents():
     # Verify deleted
     get_res2 = client.get(f"/api/ingest/documents/{target_id}")
     assert get_res2.status_code == 404
+
+
+def test_get_document_chunks_and_metadata():
+    payload = {
+        "title": "employee_handbook.txt",
+        "content": "All employees receive 20 days off.\n\nSick leave is 10 days.",
+        "format": "txt",
+        "document_type": "HR_POLICY",
+    }
+    create_res = client.post("/api/ingest/text", json=payload)
+    assert create_res.status_code == 201
+    doc_id = create_res.json()["document"]["id"]
+
+    # Retrieve chunks endpoint
+    chunks_res = client.get(f"/api/ingest/documents/{doc_id}/chunks")
+    assert chunks_res.status_code == 200
+    chunks = chunks_res.json()
+    assert len(chunks) >= 1
+    c0 = chunks[0]
+    assert c0["metadata"]["document_type"] == "HR_POLICY"
+    assert c0["metadata"]["source"] == "employee_handbook.txt"
+    assert "chunk_id" in c0["metadata"]
+    assert "token_count" in c0["metadata"]

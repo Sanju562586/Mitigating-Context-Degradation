@@ -114,4 +114,6 @@ class ElementChunker:
         return chunks
 
 
-default_chunker = ElementChunker()
+from src.chunking.semantic import SemanticChunker, default_semantic_chunker
+
+default_chunker = default_semantic_chunker

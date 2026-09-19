@@ -50,6 +50,11 @@ class PDFParser(BaseParser):
         except Exception:
             pass
 
+        if "document_type" in kwargs and kwargs["document_type"]:
+            pdf_metadata["document_type"] = kwargs["document_type"]
+        if "extra_metadata" in kwargs and isinstance(kwargs["extra_metadata"], dict):
+            pdf_metadata.update(kwargs["extra_metadata"])
+
         el_idx = 0
         for page_idx in range(page_count):
             page = doc[page_idx]

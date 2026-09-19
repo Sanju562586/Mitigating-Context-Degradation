@@ -69,11 +69,17 @@ class TxtParser(BaseParser):
                 )
             )
 
+        extra = {"encoding": used_encoding}
+        if "document_type" in kwargs and kwargs["document_type"]:
+            extra["document_type"] = kwargs["document_type"]
+        if "extra_metadata" in kwargs and isinstance(kwargs["extra_metadata"], dict):
+            extra.update(kwargs["extra_metadata"])
+
         return Document.create(
             source_name=filename,
             file_type=DocumentType.TXT,
             elements=elements,
             file_size_bytes=file_size_bytes or len(content),
-            extra_metadata={"encoding": used_encoding},
+            extra_metadata=extra,
             raw_content=normalized.strip(),
         )

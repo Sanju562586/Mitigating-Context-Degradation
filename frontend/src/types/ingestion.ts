@@ -11,6 +11,24 @@ export interface DocumentElement {
   metadata: Record<string, unknown>;
 }
 
+export interface ChunkMetadata {
+  chunk_id: string;
+  source: string;
+  page?: number | null;
+  section: string;
+  document_type: string;
+  created_at: string;
+  token_count?: number;
+  char_count?: number;
+  word_count?: number;
+  overlap_token_count?: number;
+  has_table?: boolean;
+  has_code?: boolean;
+  prev_chunk_id?: string | null;
+  next_chunk_id?: string | null;
+  [key: string]: unknown;
+}
+
 export interface DocumentChunk {
   id: string;
   document_id: string;
@@ -18,9 +36,10 @@ export interface DocumentChunk {
   content: string;
   char_count: number;
   word_count: number;
+  token_count?: number;
   page_numbers: number[];
   section_titles: string[];
-  metadata: Record<string, unknown>;
+  metadata: ChunkMetadata;
 }
 
 export interface DocumentMetadata {

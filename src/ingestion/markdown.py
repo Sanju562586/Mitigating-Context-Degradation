@@ -133,6 +133,11 @@ class MarkdownParser(BaseParser):
         # Flush any trailing block
         flush_current_block(element_type="code" if in_code_block else "paragraph")
 
+        if "document_type" in kwargs and kwargs["document_type"]:
+            extra_metadata["document_type"] = kwargs["document_type"]
+        if "extra_metadata" in kwargs and isinstance(kwargs["extra_metadata"], dict):
+            extra_metadata.update(kwargs["extra_metadata"])
+
         return Document.create(
             source_name=filename,
             file_type=DocumentType.MD,

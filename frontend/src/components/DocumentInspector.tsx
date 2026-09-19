@@ -26,6 +26,8 @@ export const DocumentInspector: React.FC<DocumentInspectorProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<"overview" | "chunks" | "blocks" | "json">("overview");
   const [copied, setCopied] = useState(false);
+  const [copiedChunkId, setCopiedChunkId] = useState<string | null>(null);
+  const [expandedChunkId, setExpandedChunkId] = useState<string | null>(null);
 
   if (isLoading) {
     return (
@@ -302,43 +304,137 @@ export const DocumentInspector: React.FC<DocumentInspectorProps> = ({
         </div>
       )}
 
-      {/* TAB 2: CHUNKS MANIFEST (METADATA ONLY) */}
+      {/* TAB 2: CHUNKS MANIFEST & METADATA TAGS */}
       {activeTab === "chunks" && (
-        <div className="space-y-2 max-h-[460px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-800">
+        <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-800">
           {(!document.chunks || document.chunks.length === 0) ? (
             <div className="p-6 text-center text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl">
               No chunks generated for this document.
             </div>
           ) : (
-            document.chunks.map((chunk, idx) => (
-              <div
-                key={chunk.id || idx}
-                className="p-3 rounded-xl bg-slate-950 border border-slate-800/80 hover:border-slate-700 transition-colors flex items-center justify-between text-xs"
-              >
-                <div className="flex items-center gap-3">
-                  <span className="px-2 py-1 rounded bg-indigo-500/10 text-indigo-400 font-mono font-bold border border-indigo-500/20 text-[11px]">
-                    #{chunk.chunk_index}
-                  </span>
-                  <div>
-                    <div className="font-mono text-slate-200 font-semibold">{chunk.id}</div>
-                    <div className="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5">
-                      {chunk.page_numbers && chunk.page_numbers.length > 0 && (
-                        <span>Pages: {chunk.page_numbers.join(", ")}</span>
+            document.chunks.map((chunk, idx) => {
+              const chunkId = chunk.metadata?.chunk_id || chunk.id;
+              const docType = chunk.metadata?.document_type || "DOCUMENT";
+              const pageNum = chunk.metadata?.page ?? (chunk.page_numbers && chunk.page_numbers.length > 0 ? chunk.page_numbers[0] : null);
+              const sectionName = chunk.metadata?.section || (chunk.section_titles && chunk.section_titles.length > 0 ? chunk.section_titles[0] : "General");
+              const createdAt = chunk.metadata?.created_at || document.metadata.created_at?.split("T")[0];
+              const tokenCount = chunk.token_count || chunk.metadata?.token_count || Math.round(chunk.word_count * 1.3);
+              const overlapCount = chunk.metadata?.overlap_token_count || 0;
+              const isExpanded = expandedChunkId === chunkId;
+
+              const metadataExample = {
+                chunk_id: chunkId,
+                source: chunk.metadata?.source || document.metadata.source_name,
+                page: pageNum,
+                section: sectionName,
+                document_type: docType,
+                created_at: createdAt,
+              };
+
+              const handleCopyChunkMeta = (e: React.MouseEvent) => {
+                e.stopPropagation();
+                navigator.clipboard.writeText(JSON.stringify(metadataExample, null, 2));
+                setCopiedChunkId(chunkId);
+                setTimeout(() => setCopiedChunkId(null), 2000);
+              };
+
+              return (
+                <div
+                  key={chunkId || idx}
+                  className="p-4 rounded-xl bg-slate-950 border border-slate-800/90 hover:border-slate-700 transition-all space-y-3"
+                >
+                  {/* Card Header: IDs & Metadata Badges */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 font-mono font-bold border border-indigo-500/20 text-xs">
+                        #{chunk.chunk_index}
+                      </span>
+                      <span className="px-2.5 py-0.5 rounded-md font-mono text-xs font-bold bg-slate-900 text-indigo-300 border border-slate-800">
+                        {chunkId}
+                      </span>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        {docType}
+                      </span>
+                      {pageNum !== null && (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                          Page {pageNum}
+                        </span>
                       )}
-                      {chunk.section_titles && chunk.section_titles.length > 0 && (
-                        <span>• Section: {chunk.section_titles[0]}</span>
+                      {sectionName && (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-purple-500/10 text-purple-300 border border-purple-500/20 truncate max-w-xs" title={sectionName}>
+                          {sectionName}
+                        </span>
                       )}
                     </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={handleCopyChunkMeta}
+                        className="flex items-center gap-1 px-2.5 py-1 text-[11px] rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800 transition-colors"
+                        title="Copy chunk metadata JSON"
+                      >
+                        {copiedChunkId === chunkId ? (
+                          <>
+                            <Check className="h-3 w-3 text-emerald-400" />
+                            <span className="text-emerald-400">Copied</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-3 w-3" />
+                            <span>Copy Tag JSON</span>
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        onClick={() => setExpandedChunkId(isExpanded ? null : chunkId)}
+                        className="px-2 py-1 text-[11px] text-slate-400 hover:text-slate-200 rounded-lg hover:bg-slate-900 border border-slate-800 transition-colors"
+                      >
+                        {isExpanded ? "Hide Text" : "View Text"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Token Metrics & Overlap Tag */}
+                  <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono pt-1 border-t border-slate-900">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-indigo-400 font-semibold">{tokenCount} tokens</span>
+                      <span>•</span>
+                      <span>{chunk.word_count} words</span>
+                      <span>•</span>
+                      <span>{chunk.char_count} chars</span>
+                    </div>
+
+                    {overlapCount > 0 && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                        +{overlapCount} tokens overlap
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Text preview or expanded full text */}
+                  {isExpanded ? (
+                    <div className="p-3 bg-slate-900/90 rounded-lg text-xs font-mono text-slate-200 whitespace-pre-wrap leading-relaxed border border-slate-800">
+                      {chunk.content}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed">
+                      {chunk.content}
+                    </p>
+                  )}
+
+                  {/* Standardized Metadata Spec Viewer */}
+                  <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-900 text-[11px] font-mono text-slate-400">
+                    <div className="text-[10px] uppercase font-bold text-slate-500 mb-1">
+                      Chunk Metadata Tags:
+                    </div>
+                    <pre className="text-indigo-300 overflow-x-auto text-[11px]">
+                      {JSON.stringify(metadataExample, null, 2)}
+                    </pre>
                   </div>
                 </div>
-
-                <div className="flex items-center gap-3 text-right font-mono text-[11px] text-slate-400">
-                  <span>{chunk.word_count} words</span>
-                  <span>•</span>
-                  <span>{chunk.char_count} chars</span>
-                </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       )}
