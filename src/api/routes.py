@@ -6,6 +6,7 @@ from typing import List, Optional
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 
+from src.indexing.manager import default_index_manager
 from src.ingestion.models import Document, DocumentChunk, DocumentMetadata, DocumentType
 from src.ingestion.registry import UnsupportedFormatError, default_registry
 from src.ingestion.store import default_store
@@ -28,6 +29,7 @@ class IngestResponse(BaseModel):
     success: bool = True
     document: Document
     message: str = "Document parsed and stored successfully"
+    index_stats: Optional[dict] = None
 
 
 @router.post("/upload", response_model=IngestResponse, status_code=status.HTTP_201_CREATED)
@@ -55,10 +57,14 @@ async def upload_document(
         )
         default_store.add(doc)
 
+        # Index chunks: Sentence-Transformers L2 embeddings -> FAISS + BM25 + Metadata Store
+        idx_res = default_index_manager.index_document(doc)
+
         return IngestResponse(
             success=True,
             document=doc,
             message=f"Successfully parsed '{filename}' as {doc.metadata.file_type.value.upper()}",
+            index_stats=idx_res,
         )
     except UnsupportedFormatError as exc:
         raise HTTPException(
@@ -97,10 +103,14 @@ def ingest_text(payload: RawTextInput) -> IngestResponse:
         )
         default_store.add(doc)
 
+        # Index chunks: Sentence-Transformers L2 embeddings -> FAISS + BM25 + Metadata Store
+        idx_res = default_index_manager.index_document(doc)
+
         return IngestResponse(
             success=True,
             document=doc,
             message=f"Successfully ingested raw text as {doc.metadata.file_type.value.upper()}",
+            index_stats=idx_res,
         )
     except Exception as exc:
         raise HTTPException(
@@ -139,13 +149,21 @@ def get_document_chunks(doc_id: str) -> List[DocumentChunk]:
     return doc.chunks
 
 
+@router.get("/indexes/stats")
+def get_index_stats() -> dict:
+    """Retrieve current status and telemetry of FAISS, BM25, and Metadata indexes."""
+    return default_index_manager.get_stats()
+
+
 @router.delete("/documents/{doc_id}")
 def delete_document(doc_id: str) -> dict:
-    """Delete a document by its unique ID."""
+    """Delete a document by its unique ID and remove from all indexes."""
     deleted = default_store.delete(doc_id)
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Document '{doc_id}' not found.",
         )
-    return {"success": True, "message": f"Document '{doc_id}' deleted successfully."}
+    # Remove from FAISS, BM25, and Metadata Store
+    default_index_manager.remove_document(doc_id)
+    return {"success": True, "message": f"Document '{doc_id}' deleted and unindexed successfully."}

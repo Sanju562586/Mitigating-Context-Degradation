@@ -5,6 +5,7 @@ import { Navbar } from "@/components/Navbar";
 import { UploadZone } from "@/components/UploadZone";
 import { DocumentList } from "@/components/DocumentList";
 import { DocumentInspector } from "@/components/DocumentInspector";
+import { Toast, ToastMessage } from "@/components/Toast";
 import {
   checkHealth,
   deleteDocumentById,
@@ -22,6 +23,7 @@ export default function IngestionPage() {
   const [selectedDoc, setSelectedDoc] = useState<Document | null>(null);
   const [isLoadingDocs, setIsLoadingDocs] = useState(false);
   const [isLoadingSelected, setIsLoadingSelected] = useState(false);
+  const [toast, setToast] = useState<ToastMessage | null>(null);
 
   // Poll / check backend health & initial docs
   const loadHealthAndDocs = useCallback(async () => {
@@ -93,6 +95,12 @@ export default function IngestionPage() {
     setDocuments((prev) => [doc.metadata, ...prev.filter((d) => d.document_id !== doc.id)]);
     setSelectedDocId(doc.id);
     setSelectedDoc(doc);
+    setToast({
+      id: String(Date.now()),
+      title: "Backend Indexing Complete",
+      description: `L2-normalized embeddings generated. FAISS Vector Index, BM25 Index, and Metadata Store updated (${doc.chunks?.length || 0} chunks indexed).`,
+      type: "success",
+    });
   };
 
   const handleDeleteDocument = async (docId: string) => {
@@ -108,6 +116,12 @@ export default function IngestionPage() {
           setSelectedDoc(null);
         }
       }
+      setToast({
+        id: String(Date.now()),
+        title: "Document Unindexed",
+        description: `Removed document ${docId} and cleaned entries from FAISS, BM25, and Metadata Store.`,
+        type: "info",
+      });
     } catch (err) {
       alert("Failed to delete document: " + err);
     }
@@ -115,6 +129,9 @@ export default function IngestionPage() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-indigo-500/30">
+      {/* Transient Toast Notification */}
+      <Toast toast={toast} onDismiss={() => setToast(null)} />
+
       {/* Top Navbar */}
       <Navbar backendHealth={backendHealth} healthError={healthError} />
 

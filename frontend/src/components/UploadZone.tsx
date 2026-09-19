@@ -185,10 +185,10 @@ export const UploadZone: React.FC<UploadZoneProps> = ({ onIngestSuccess }) => {
               <div className="flex flex-col items-center gap-3 py-4">
                 <Loader2 className="h-10 w-10 text-indigo-400 animate-spin" />
                 <p className="text-sm font-medium text-slate-200">
-                  Parsing and normalizing document elements...
+                  Ingesting, embedding & indexing document...
                 </p>
                 <p className="text-xs text-slate-500">
-                  Extracting sections, calculating tokens & generating hashes
+                  Cleaning • Semantic Chunking • Sentence-Transformers • FAISS • BM25 • Metadata Store
                 </p>
               </div>
             ) : (
@@ -279,7 +279,7 @@ export const UploadZone: React.FC<UploadZoneProps> = ({ onIngestSuccess }) => {
               {isProcessing ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Parsing Content...
+                  Embedding & Indexing...
                 </>
               ) : (
                 <>
