@@ -3,6 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from src.api.query_routes import router as query_router
 from src.api.routes import router as ingestion_router
 from src.ingestion.registry import default_registry
 
@@ -26,6 +27,7 @@ def create_app() -> FastAPI:
 
     # Mount routes
     app.include_router(ingestion_router)
+    app.include_router(query_router)
 
     @app.get("/api/health", tags=["Health"])
     def health_check():
