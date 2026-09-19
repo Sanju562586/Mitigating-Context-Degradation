@@ -12,14 +12,14 @@ from src.indexing.metadata_store import MetadataStore
 from src.indexing.vector_index import FaissVectorIndex
 
 __all__ = [
-    "EmbeddingEngine",
-    "default_embedding_engine",
-    "FaissVectorIndex",
-    "BM25Index",
-    "bm25_tokenize",
-    "MetadataStore",
-    "IndexManager",
-    "default_index_manager",
-    "DEFAULT_EMBEDDING_MODEL",
     "DEFAULT_DIMENSION",
+    "DEFAULT_EMBEDDING_MODEL",
+    "BM25Index",
+    "EmbeddingEngine",
+    "FaissVectorIndex",
+    "IndexManager",
+    "MetadataStore",
+    "bm25_tokenize",
+    "default_embedding_engine",
+    "default_index_manager",
 ]

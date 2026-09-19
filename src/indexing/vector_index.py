@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+
 import faiss
 import numpy as np
 
@@ -18,7 +18,7 @@ class FaissVectorIndex:
     when vectors are L2-normalized.
     """
 
-    def __init__(self, dimension: int = 384, storage_dir: Optional[Path] = None) -> None:
+    def __init__(self, dimension: int = 384, storage_dir: Path | None = None) -> None:
         self.dimension = dimension
         self.storage_dir = Path(storage_dir) if storage_dir else Path("data/indexes")
         self.storage_dir.mkdir(parents=True, exist_ok=True)
@@ -29,11 +29,11 @@ class FaissVectorIndex:
         # Internal FAISS index
         self._index: faiss.Index = faiss.IndexFlatIP(self.dimension)
         # Vector ID (0..N-1) -> chunk_id
-        self._id_to_chunk: List[str] = []
+        self._id_to_chunk: list[str] = []
         # doc_id -> list of chunk_ids
-        self._doc_to_chunks: Dict[str, List[str]] = {}
+        self._doc_to_chunks: dict[str, list[str]] = {}
         # chunk_id -> raw embedding vector
-        self._embeddings_cache: Dict[str, np.ndarray] = {}
+        self._embeddings_cache: dict[str, np.ndarray] = {}
 
         # Automatically load existing index if present
         self.load()
@@ -43,7 +43,7 @@ class FaissVectorIndex:
         """Return the number of indexed vectors."""
         return self._index.ntotal
 
-    def add_chunks(self, chunks: List[DocumentChunk], embeddings: np.ndarray) -> None:
+    def add_chunks(self, chunks: list[DocumentChunk], embeddings: np.ndarray) -> None:
         """Add chunks and their corresponding L2-normalized embeddings into the index."""
         if not chunks or embeddings.size == 0:
             return
@@ -70,7 +70,7 @@ class FaissVectorIndex:
 
     def search(
         self, query_vector: np.ndarray, top_k: int = 5
-    ) -> List[Tuple[str, float]]:
+    ) -> list[tuple[str, float]]:
         """Search the index for the top_k most similar chunks using cosine similarity.
 
         Returns:
@@ -86,7 +86,7 @@ class FaissVectorIndex:
         k = min(top_k, self.total_vectors)
         distances, indices = self._index.search(q_vec, k)
 
-        results: List[Tuple[str, float]] = []
+        results: list[tuple[str, float]] = []
         for dist, idx in zip(distances[0], indices[0]):
             if idx != -1 and idx < len(self._id_to_chunk):
                 chunk_id = self._id_to_chunk[idx]
@@ -104,8 +104,8 @@ class FaissVectorIndex:
             self._embeddings_cache.pop(cid, None)
 
         # Reconstruct remaining index
-        new_id_to_chunk: List[str] = []
-        new_vectors_list: List[np.ndarray] = []
+        new_id_to_chunk: list[str] = []
+        new_vectors_list: list[np.ndarray] = []
 
         for cid in self._id_to_chunk:
             if cid not in chunks_to_remove and cid in self._embeddings_cache:

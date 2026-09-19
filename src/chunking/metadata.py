@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class MetadataTagger:
@@ -40,7 +40,7 @@ class MetadataTagger:
     def infer_document_type(
         source_name: str,
         text_sample: str = "",
-        explicit_type: Optional[str] = None,
+        explicit_type: str | None = None,
     ) -> str:
         """Infer or format document_type (e.g. 'HR_POLICY', 'RESEARCH_PAPER', 'TECHNICAL_SPEC')."""
         if explicit_type and explicit_type.strip():
@@ -129,8 +129,8 @@ class MetadataTagger:
     def generate_chunk_id(
         cls,
         source_name: str,
-        page: Optional[int],
-        section: Optional[str],
+        page: int | None,
+        section: str | None,
         sequence_num: int,
     ) -> str:
         """Generate a clean semantic chunk ID adhering to the format: {slug}_{page}_{seq:03d}.
@@ -145,15 +145,15 @@ class MetadataTagger:
     def build_chunk_metadata(
         cls,
         source_name: str,
-        page: Optional[int],
-        section: Optional[str],
+        page: int | None,
+        section: str | None,
         document_type: str,
         sequence_num: int,
         content: str,
         token_count: int,
         overlap_token_count: int = 0,
-        extra: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        extra: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Construct the standardized metadata payload for a chunk.
 
         Matches exact user specification:
@@ -169,7 +169,7 @@ class MetadataTagger:
         chunk_id = cls.generate_chunk_id(source_name, page, section, sequence_num)
         created_at_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-        meta: Dict[str, Any] = {
+        meta: dict[str, Any] = {
             "chunk_id": chunk_id,
             "source": source_name,
             "page": page,

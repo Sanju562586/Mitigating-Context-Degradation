@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 from src.chunking.metadata import MetadataTagger
 from src.chunking.tokenizer import count_tokens, get_trailing_token_overlap
 from src.ingestion.models import DocumentChunk, DocumentElement
@@ -23,12 +24,12 @@ class SemanticChunker:
     def chunk_elements(
         self,
         doc_id: str,
-        elements: List[DocumentElement],
+        elements: list[DocumentElement],
         source_name: str = "document.txt",
-        document_type: Optional[str] = None,
-        raw_text: Optional[str] = None,
-        extra_metadata: Optional[Dict[str, Any]] = None,
-    ) -> List[DocumentChunk]:
+        document_type: str | None = None,
+        raw_text: str | None = None,
+        extra_metadata: dict[str, Any] | None = None,
+    ) -> list[DocumentChunk]:
         """Convert a list of cleaned DocumentElements into semantic DocumentChunks."""
         if not elements:
             if not raw_text or not raw_text.strip():
@@ -49,8 +50,8 @@ class SemanticChunker:
             explicit_type=document_type,
         )
 
-        chunks: List[DocumentChunk] = []
-        current_texts: List[str] = []
+        chunks: list[DocumentChunk] = []
+        current_texts: list[str] = []
         current_pages: set[int] = set()
         current_sections: set[str] = set()
         current_token_count = 0
@@ -164,13 +165,13 @@ class SemanticChunker:
         doc_id: str,
         source_name: str,
         inferred_type: str,
-        texts: List[str],
+        texts: list[str],
         pages: set[int],
         sections: set[str],
         section_title: str,
         seq_num: int,
         overlap_tokens_count: int = 0,
-        extra_metadata: Optional[Dict[str, Any]] = None,
+        extra_metadata: dict[str, Any] | None = None,
     ) -> DocumentChunk:
         """Assemble a single DocumentChunk with complete metadata."""
         content = "\n\n".join(t for t in texts if t.strip()).strip()
@@ -207,9 +208,9 @@ class SemanticChunker:
         doc_id: str,
         text: str,
         source_name: str,
-        document_type: Optional[str] = None,
-        extra_metadata: Optional[Dict[str, Any]] = None,
-    ) -> List[DocumentChunk]:
+        document_type: str | None = None,
+        extra_metadata: dict[str, Any] | None = None,
+    ) -> list[DocumentChunk]:
         """Fallback semantic chunker for raw plain text documents."""
         paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
         inferred_type = MetadataTagger.infer_document_type(
@@ -218,8 +219,8 @@ class SemanticChunker:
             explicit_type=document_type,
         )
 
-        chunks: List[DocumentChunk] = []
-        current_texts: List[str] = []
+        chunks: list[DocumentChunk] = []
+        current_texts: list[str] = []
         current_tokens = 0
         seq_num = 1
         previous_overlap = ""
@@ -287,13 +288,13 @@ class SemanticChunker:
         self._wire_chunk_pointers(chunks)
         return chunks
 
-    def _split_into_sentences(self, text: str) -> List[str]:
+    def _split_into_sentences(self, text: str) -> list[str]:
         """Split a long block of text into sentences."""
         # Split on period, question mark, or exclamation mark followed by whitespace
         parts = re.split(r"(?<=[.!?])\s+", text)
         return [p.strip() for p in parts if p.strip()]
 
-    def _wire_chunk_pointers(self, chunks: List[DocumentChunk]) -> None:
+    def _wire_chunk_pointers(self, chunks: list[DocumentChunk]) -> None:
         """Inject previous_chunk_id and next_chunk_id for traversal."""
         for i, chunk in enumerate(chunks):
             prev_id = chunks[i - 1].id if i > 0 else None

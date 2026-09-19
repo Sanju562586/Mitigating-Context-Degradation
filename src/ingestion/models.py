@@ -8,7 +8,8 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -48,15 +49,15 @@ class DocumentElement(BaseModel):
         description="Type of element: 'page', 'paragraph', 'heading', 'table', 'code', etc.",
     )
     content: str = Field(..., description="Normalized text content of this element")
-    page_number: Optional[int] = Field(
+    page_number: int | None = Field(
         default=None, description="1-indexed page number if applicable"
     )
-    section_title: Optional[str] = Field(
+    section_title: str | None = Field(
         default=None, description="Title of the enclosing section or heading"
     )
     char_count: int = Field(default=0, description="Character count of content")
     word_count: int = Field(default=0, description="Word count of content")
-    metadata: Dict[str, Any] = Field(
+    metadata: dict[str, Any] = Field(
         default_factory=dict, description="Format-specific metadata for this element"
     )
 
@@ -78,13 +79,13 @@ class DocumentChunk(BaseModel):
     char_count: int = Field(default=0, description="Character count of chunk")
     word_count: int = Field(default=0, description="Word count of chunk")
     token_count: int = Field(default=0, description="Token count of chunk")
-    page_numbers: List[int] = Field(
+    page_numbers: list[int] = Field(
         default_factory=list, description="Pages spanned by this chunk"
     )
-    section_titles: List[str] = Field(
+    section_titles: list[str] = Field(
         default_factory=list, description="Sections/headings relevant to this chunk"
     )
-    metadata: Dict[str, Any] = Field(
+    metadata: dict[str, Any] = Field(
         default_factory=dict, description="Custom metadata and provenance for this chunk"
     )
 
@@ -110,14 +111,14 @@ class DocumentMetadata(BaseModel):
     word_count: int = Field(default=0, description="Total words in extracted content")
     element_count: int = Field(default=0, description="Total number of structured elements/blocks")
     chunk_count: int = Field(default=0, description="Total number of chunks produced")
-    page_count: Optional[int] = Field(
+    page_count: int | None = Field(
         default=None, description="Total page count (for paginated documents like PDF)"
     )
     created_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat(),
         description="ISO-8601 creation timestamp",
     )
-    extra: Dict[str, Any] = Field(
+    extra: dict[str, Any] = Field(
         default_factory=dict, description="Extra metadata extracted from file header/tags"
     )
 
@@ -132,11 +133,11 @@ class Document(BaseModel):
     id: str = Field(..., description="Unique document ID (matching metadata.document_id)")
     content: str = Field(..., description="Full consolidated normalized text content")
     metadata: DocumentMetadata = Field(..., description="Document-level metadata")
-    elements: List[DocumentElement] = Field(
+    elements: list[DocumentElement] = Field(
         default_factory=list,
         description="List of structured elements (pages, headings, paragraphs)",
     )
-    chunks: List[DocumentChunk] = Field(
+    chunks: list[DocumentChunk] = Field(
         default_factory=list,
         description="List of retrievable text chunks generated from elements",
     )
@@ -146,15 +147,15 @@ class Document(BaseModel):
         cls,
         source_name: str,
         file_type: DocumentType,
-        elements: List[DocumentElement],
+        elements: list[DocumentElement],
         file_size_bytes: int = 0,
-        extra_metadata: Optional[Dict[str, Any]] = None,
-        raw_content: Optional[str] = None,
-        page_count: Optional[int] = None,
+        extra_metadata: dict[str, Any] | None = None,
+        raw_content: str | None = None,
+        page_count: int | None = None,
     ) -> Document:
         """Factory method to construct a canonical Document with cleaning and semantic chunking."""
-        from src.cleaning.cleaner import default_cleaner
         from src.chunking.semantic import default_semantic_chunker
+        from src.cleaning.cleaner import default_cleaner
 
         # 1. Clean elements (removes duplicate headers, page numbers, broken line breaks, irrelevant symbols, repeated footers)
         cleaned_elements = default_cleaner.clean_elements(elements)

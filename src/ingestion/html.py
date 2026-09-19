@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 from bs4 import BeautifulSoup
 
 from src.ingestion.base import BaseParser
@@ -16,7 +17,7 @@ class HtmlParser(BaseParser):
     def supported_types(self) -> list[DocumentType]:
         return [DocumentType.HTML]
 
-    def can_parse(self, extension: str, mime_type: Optional[str] = None) -> bool:
+    def can_parse(self, extension: str, mime_type: str | None = None) -> bool:
         ext = extension.lower().lstrip(".")
         if ext in ("html", "htm", "xhtml"):
             return True
@@ -48,7 +49,7 @@ class HtmlParser(BaseParser):
         soup = BeautifulSoup(html_str, "html.parser")
 
         # Extract title and meta
-        extra_metadata: Dict[str, Any] = {}
+        extra_metadata: dict[str, Any] = {}
         if soup.title and soup.title.string:
             extra_metadata["title"] = soup.title.string.strip()
 
@@ -60,9 +61,9 @@ class HtmlParser(BaseParser):
         for tag in soup(["script", "style", "noscript", "nav", "footer", "header", "aside", "svg"]):
             tag.decompose()
 
-        elements: List[DocumentElement] = []
-        full_text_blocks: List[str] = []
-        current_heading: Optional[str] = None
+        elements: list[DocumentElement] = []
+        full_text_blocks: list[str] = []
+        current_heading: str | None = None
         el_idx = 0
 
         # Find body or fallback to entire soup
@@ -142,7 +143,7 @@ class HtmlParser(BaseParser):
 
         full_content = "\n\n".join(full_text_blocks)
 
-        if "document_type" in kwargs and kwargs["document_type"]:
+        if kwargs.get("document_type"):
             extra_metadata["document_type"] = kwargs["document_type"]
         if "extra_metadata" in kwargs and isinstance(kwargs["extra_metadata"], dict):
             extra_metadata.update(kwargs["extra_metadata"])

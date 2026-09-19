@@ -4,22 +4,23 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 from src.ingestion.models import DocumentChunk
 
 
 class MetadataStore:
     """Stores full chunk content and structured metadata tags mapped by chunk_id."""
 
-    def __init__(self, storage_dir: Optional[Path] = None) -> None:
+    def __init__(self, storage_dir: Path | None = None) -> None:
         self.storage_dir = Path(storage_dir) if storage_dir else Path("data/indexes")
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self.store_path = self.storage_dir / "metadata_store.json"
 
         # chunk_id -> Chunk Record (content + metadata)
-        self._store: Dict[str, Dict[str, Any]] = {}
+        self._store: dict[str, dict[str, Any]] = {}
         # doc_id -> list of chunk_ids
-        self._doc_to_chunks: Dict[str, List[str]] = {}
+        self._doc_to_chunks: dict[str, list[str]] = {}
 
         self.load()
 
@@ -28,7 +29,7 @@ class MetadataStore:
         """Total chunks stored."""
         return len(self._store)
 
-    def add_chunks(self, chunks: List[DocumentChunk]) -> None:
+    def add_chunks(self, chunks: list[DocumentChunk]) -> None:
         """Store chunk records with their content and standardized metadata."""
         if not chunks:
             return
@@ -51,11 +52,11 @@ class MetadataStore:
 
         self.save()
 
-    def get(self, chunk_id: str) -> Optional[Dict[str, Any]]:
+    def get(self, chunk_id: str) -> dict[str, Any] | None:
         """Retrieve a chunk record by chunk_id."""
         return self._store.get(chunk_id)
 
-    def get_by_document(self, doc_id: str) -> List[Dict[str, Any]]:
+    def get_by_document(self, doc_id: str) -> list[dict[str, Any]]:
         """Retrieve all chunk records belonging to a document."""
         chunk_ids = self._doc_to_chunks.get(doc_id, [])
         return [self._store[cid] for cid in chunk_ids if cid in self._store]

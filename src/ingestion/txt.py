@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
-
 from src.ingestion.base import BaseParser
 from src.ingestion.models import Document, DocumentElement, DocumentType
 
@@ -15,7 +13,7 @@ class TxtParser(BaseParser):
     def supported_types(self) -> list[DocumentType]:
         return [DocumentType.TXT]
 
-    def can_parse(self, extension: str, mime_type: Optional[str] = None) -> bool:
+    def can_parse(self, extension: str, mime_type: str | None = None) -> bool:
         ext = extension.lower().lstrip(".")
         if ext in ("txt", "text", "log", "csv", "tsv"):
             return True
@@ -36,7 +34,7 @@ class TxtParser(BaseParser):
 
         # Try common text encodings
         encodings = ["utf-8", "utf-8-sig", "latin-1", "cp1252", "utf-16"]
-        decoded_text: Optional[str] = None
+        decoded_text: str | None = None
         used_encoding: str = "unknown"
 
         for enc in encodings:
@@ -58,7 +56,7 @@ class TxtParser(BaseParser):
         # Split into paragraphs by blank lines
         raw_paragraphs = [p.strip() for p in normalized.split("\n\n") if p.strip()]
 
-        elements: List[DocumentElement] = []
+        elements: list[DocumentElement] = []
         for idx, para in enumerate(raw_paragraphs):
             elements.append(
                 DocumentElement(
@@ -70,7 +68,7 @@ class TxtParser(BaseParser):
             )
 
         extra = {"encoding": used_encoding}
-        if "document_type" in kwargs and kwargs["document_type"]:
+        if kwargs.get("document_type"):
             extra["document_type"] = kwargs["document_type"]
         if "extra_metadata" in kwargs and isinstance(kwargs["extra_metadata"], dict):
             extra.update(kwargs["extra_metadata"])

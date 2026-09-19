@@ -5,7 +5,7 @@ from __future__ import annotations
 import pickle
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+
 from rank_bm25 import BM25Plus
 
 # pyrefly: ignore [missing-import]
@@ -15,7 +15,7 @@ from src.ingestion.models import DocumentChunk
 _WORD_REGEX = re.compile(r"\w+")
 
 
-def bm25_tokenize(text: str) -> List[str]:
+def bm25_tokenize(text: str) -> list[str]:
     """Tokenize text into lowercase lexical terms for BM25 indexing."""
     if not text:
         return []
@@ -29,15 +29,15 @@ class BM25Index:
     Uses BM25Plus for guaranteed positive IDF across both small and large corpora.
     """
 
-    def __init__(self, storage_dir: Optional[Path] = None) -> None:
+    def __init__(self, storage_dir: Path | None = None) -> None:
         self.storage_dir = Path(storage_dir) if storage_dir else Path("data/indexes")
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self.index_path = self.storage_dir / "bm25_index.pkl"
 
-        self._chunk_ids: List[str] = []
-        self._doc_to_chunks: Dict[str, List[str]] = {}
-        self._tokenized_corpus: List[List[str]] = []
-        self._bm25: Optional[BM25Plus] = None
+        self._chunk_ids: list[str] = []
+        self._doc_to_chunks: dict[str, list[str]] = {}
+        self._tokenized_corpus: list[list[str]] = []
+        self._bm25: BM25Plus | None = None
 
         self.load()
 
@@ -46,7 +46,7 @@ class BM25Index:
         """Return the number of documents/chunks in the BM25 index."""
         return len(self._chunk_ids)
 
-    def add_chunks(self, chunks: List[DocumentChunk]) -> None:
+    def add_chunks(self, chunks: list[DocumentChunk]) -> None:
         """Add new chunks to the BM25 corpus and re-fit the index."""
         if not chunks:
             return
@@ -66,7 +66,7 @@ class BM25Index:
 
         self.save()
 
-    def search(self, query: str, top_k: int = 5) -> List[Tuple[str, float]]:
+    def search(self, query: str, top_k: int = 5) -> list[tuple[str, float]]:
         """Search the BM25 index for the most relevant chunks matching the query.
 
         Returns:
@@ -83,7 +83,7 @@ class BM25Index:
         top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
 
         query_set = set(query_tokens)
-        results: List[Tuple[str, float]] = []
+        results: list[tuple[str, float]] = []
         for idx in top_indices[:top_k]:
             # Ensure the document actually contains matching terms
             doc_tokens = set(self._tokenized_corpus[idx])
@@ -99,8 +99,8 @@ class BM25Index:
 
         chunks_to_remove = set(self._doc_to_chunks.pop(doc_id, []))
 
-        new_chunk_ids: List[str] = []
-        new_tokenized_corpus: List[List[str]] = []
+        new_chunk_ids: list[str] = []
+        new_tokenized_corpus: list[list[str]] = []
 
         for cid, tokens in zip(self._chunk_ids, self._tokenized_corpus):
             if cid not in chunks_to_remove:

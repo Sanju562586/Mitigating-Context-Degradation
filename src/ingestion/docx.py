@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import io
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 import docx
 
 from src.ingestion.base import BaseParser
@@ -17,7 +18,7 @@ class DocxParser(BaseParser):
     def supported_types(self) -> list[DocumentType]:
         return [DocumentType.DOCX]
 
-    def can_parse(self, extension: str, mime_type: Optional[str] = None) -> bool:
+    def can_parse(self, extension: str, mime_type: str | None = None) -> bool:
         ext = extension.lower().lstrip(".")
         if ext in ("docx", "doc"):
             return True
@@ -39,8 +40,8 @@ class DocxParser(BaseParser):
         doc_stream = io.BytesIO(content)
         doc = docx.Document(doc_stream)
 
-        elements: List[DocumentElement] = []
-        docx_metadata: Dict[str, Any] = {}
+        elements: list[DocumentElement] = []
+        docx_metadata: dict[str, Any] = {}
 
         # Extract core properties if available
         try:
@@ -52,9 +53,9 @@ class DocxParser(BaseParser):
         except Exception:
             pass
 
-        current_heading: Optional[str] = None
+        current_heading: str | None = None
         el_idx = 0
-        full_text_blocks: List[str] = []
+        full_text_blocks: list[str] = []
 
         # Iterate over paragraphs
         for p in doc.paragraphs:
@@ -106,7 +107,7 @@ class DocxParser(BaseParser):
 
         full_content = "\n\n".join(full_text_blocks)
 
-        if "document_type" in kwargs and kwargs["document_type"]:
+        if kwargs.get("document_type"):
             docx_metadata["document_type"] = kwargs["document_type"]
         if "extra_metadata" in kwargs and isinstance(kwargs["extra_metadata"], dict):
             docx_metadata.update(kwargs["extra_metadata"])

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from src.ingestion.base import BaseParser
 from src.ingestion.models import Document, DocumentElement, DocumentType
@@ -16,7 +16,7 @@ class MarkdownParser(BaseParser):
     def supported_types(self) -> list[DocumentType]:
         return [DocumentType.MD]
 
-    def can_parse(self, extension: str, mime_type: Optional[str] = None) -> bool:
+    def can_parse(self, extension: str, mime_type: str | None = None) -> bool:
         ext = extension.lower().lstrip(".")
         if ext in ("md", "markdown", "mdown", "mkd"):
             return True
@@ -43,7 +43,7 @@ class MarkdownParser(BaseParser):
         # Normalize line endings
         normalized = text.replace("\r\n", "\n").replace("\r", "\n")
 
-        extra_metadata: Dict[str, Any] = {}
+        extra_metadata: dict[str, Any] = {}
 
         # Check for YAML frontmatter
         frontmatter_match = re.match(r"^---\s*\n(.*?)\n---\s*\n", normalized, re.DOTALL)
@@ -57,16 +57,16 @@ class MarkdownParser(BaseParser):
                     key, _, val = line.partition(":")
                     extra_metadata[key.strip()] = val.strip().strip("'\"")
 
-        elements: List[DocumentElement] = []
+        elements: list[DocumentElement] = []
         lines = body_text.split("\n")
 
-        current_heading: Optional[str] = None
-        current_block: List[str] = []
+        current_heading: str | None = None
+        current_block: list[str] = []
         in_code_block = False
         code_lang = ""
         el_idx = 0
 
-        def flush_current_block(element_type: str = "paragraph", extra_meta: Optional[dict] = None):
+        def flush_current_block(element_type: str = "paragraph", extra_meta: dict | None = None):
             nonlocal el_idx, current_block
             block_content = "\n".join(current_block).strip()
             if block_content:
@@ -133,7 +133,7 @@ class MarkdownParser(BaseParser):
         # Flush any trailing block
         flush_current_block(element_type="code" if in_code_block else "paragraph")
 
-        if "document_type" in kwargs and kwargs["document_type"]:
+        if kwargs.get("document_type"):
             extra_metadata["document_type"] = kwargs["document_type"]
         if "extra_metadata" in kwargs and isinstance(kwargs["extra_metadata"], dict):
             extra_metadata.update(kwargs["extra_metadata"])

@@ -13,24 +13,31 @@ from src.ingestion.models import (
     DocumentType,
 )
 from src.ingestion.pdf import PDFParser
-from src.ingestion.registry import ParserRegistry, UnsupportedFormatError, default_registry
+from src.ingestion.registry import (
+    ParserRegistry,
+    UnsupportedFormatError,
+    default_registry,
+)
 from src.ingestion.store import DocumentStore, default_store
 from src.ingestion.txt import TxtParser
 
 __all__ = [
     "BaseParser",
-    "PDFParser",
-    "DocxParser",
-    "TxtParser",
-    "MarkdownParser",
-    "HtmlParser",
-    "ParserRegistry",
-    "UnsupportedFormatError",
-    "default_registry",
     "Document",
+    "DocumentChunk",
     "DocumentElement",
     "DocumentMetadata",
-    "DocumentType",
     "DocumentStore",
+    "DocumentType",
+    "DocxParser",
+    "ElementChunker",
+    "HtmlParser",
+    "MarkdownParser",
+    "PDFParser",
+    "ParserRegistry",
+    "TxtParser",
+    "UnsupportedFormatError",
+    "default_chunker",
+    "default_registry",
     "default_store",
 ]

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional, Union
 
 from src.ingestion.models import Document, DocumentType
 
@@ -19,7 +18,7 @@ class BaseParser(ABC):
         ...
 
     @abstractmethod
-    def can_parse(self, extension: str, mime_type: Optional[str] = None) -> bool:
+    def can_parse(self, extension: str, mime_type: str | None = None) -> bool:
         """Check if this parser can handle the given file extension or MIME type."""
         ...
 
@@ -34,7 +33,7 @@ class BaseParser(ABC):
         """Parse raw file bytes into a canonical Document object."""
         ...
 
-    def parse_file(self, file_path: Union[str, Path], **kwargs) -> Document:
+    def parse_file(self, file_path: str | Path, **kwargs) -> Document:
         """Read and parse a file from disk into a canonical Document object."""
         path = Path(file_path)
         if not path.is_file():

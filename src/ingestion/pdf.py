@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 import fitz  # PyMuPDF
 
 from src.ingestion.base import BaseParser
@@ -16,7 +17,7 @@ class PDFParser(BaseParser):
     def supported_types(self) -> list[DocumentType]:
         return [DocumentType.PDF]
 
-    def can_parse(self, extension: str, mime_type: Optional[str] = None) -> bool:
+    def can_parse(self, extension: str, mime_type: str | None = None) -> bool:
         ext = extension.lower().lstrip(".")
         if ext == "pdf":
             return True
@@ -36,12 +37,12 @@ class PDFParser(BaseParser):
             raise ValueError("Cannot parse empty PDF byte stream")
 
         doc = fitz.open(stream=content, filetype="pdf")
-        elements: List[DocumentElement] = []
+        elements: list[DocumentElement] = []
         page_count = len(doc)
-        full_text_parts: List[str] = []
+        full_text_parts: list[str] = []
 
         # Extract document-level metadata from PDF
-        pdf_metadata: Dict[str, Any] = {}
+        pdf_metadata: dict[str, Any] = {}
         try:
             raw_meta = doc.metadata or {}
             for k in ("title", "author", "subject", "keywords", "creator", "producer", "format"):
@@ -50,7 +51,7 @@ class PDFParser(BaseParser):
         except Exception:
             pass
 
-        if "document_type" in kwargs and kwargs["document_type"]:
+        if kwargs.get("document_type"):
             pdf_metadata["document_type"] = kwargs["document_type"]
         if "extra_metadata" in kwargs and isinstance(kwargs["extra_metadata"], dict):
             pdf_metadata.update(kwargs["extra_metadata"])

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
+from src.chunking.semantic import default_semantic_chunker
 from src.ingestion.models import DocumentChunk, DocumentElement
 
 
@@ -16,9 +16,9 @@ class ElementChunker:
     def chunk_elements(
         self,
         doc_id: str,
-        elements: List[DocumentElement],
-        raw_text: Optional[str] = None,
-    ) -> List[DocumentChunk]:
+        elements: list[DocumentElement],
+        raw_text: str | None = None,
+    ) -> list[DocumentChunk]:
         """Convert document elements into standardized DocumentChunk objects."""
         if not elements:
             if not raw_text or not raw_text.strip():
@@ -26,8 +26,8 @@ class ElementChunker:
             # Fallback for plain raw text without elements
             return self._chunk_plain_text(doc_id, raw_text)
 
-        chunks: List[DocumentChunk] = []
-        current_texts: List[str] = []
+        chunks: list[DocumentChunk] = []
+        current_texts: list[str] = []
         current_pages: set[int] = set()
         current_sections: set[str] = set()
         current_len = 0
@@ -87,9 +87,9 @@ class ElementChunker:
 
         return chunks
 
-    def _chunk_plain_text(self, doc_id: str, text: str) -> List[DocumentChunk]:
+    def _chunk_plain_text(self, doc_id: str, text: str) -> list[DocumentChunk]:
         """Simple sliding window chunker for raw unformatted text."""
-        chunks: List[DocumentChunk] = []
+        chunks: list[DocumentChunk] = []
         start = 0
         text_len = len(text)
         chunk_idx = 0
@@ -112,8 +112,5 @@ class ElementChunker:
             start += max(1, self.target_chars - self.overlap_chars)
 
         return chunks
-
-
-from src.chunking.semantic import SemanticChunker, default_semantic_chunker
 
 default_chunker = default_semantic_chunker

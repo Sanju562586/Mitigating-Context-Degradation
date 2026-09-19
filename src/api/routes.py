@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 
 from src.indexing.manager import default_index_manager
-from src.ingestion.models import Document, DocumentChunk, DocumentMetadata, DocumentType
+from src.ingestion.models import Document, DocumentChunk, DocumentMetadata
 from src.ingestion.registry import UnsupportedFormatError, default_registry
 from src.ingestion.store import default_store
 
@@ -19,7 +18,7 @@ class RawTextInput(BaseModel):
     title: str = Field(default="untitled.txt", description="Document title or pseudo-filename")
     content: str = Field(..., description="Raw text or markdown content")
     format: str = Field(default="txt", description="Format: 'txt', 'md', or 'html'")
-    document_type: Optional[str] = Field(
+    document_type: str | None = Field(
         default=None, description="Optional explicit document type category (e.g. HR_POLICY, TECHNICAL_SPEC)"
     )
 
@@ -29,13 +28,13 @@ class IngestResponse(BaseModel):
     success: bool = True
     document: Document
     message: str = "Document parsed and stored successfully"
-    index_stats: Optional[dict] = None
+    index_stats: dict | None = None
 
 
 @router.post("/upload", response_model=IngestResponse, status_code=status.HTTP_201_CREATED)
 async def upload_document(
     file: UploadFile = File(..., description="Document file to parse (PDF, DOCX, TXT, MD, HTML)"),
-    document_type: Optional[str] = Form(None, description="Optional explicit document type (e.g. HR_POLICY)"),
+    document_type: str | None = Form(None, description="Optional explicit document type (e.g. HR_POLICY)"),
 ) -> IngestResponse:
     """Upload and parse any supported document into the standardized Document format."""
     filename = file.filename or "uploaded_document"
@@ -74,7 +73,7 @@ async def upload_document(
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to parse document '{filename}': {str(exc)}",
+            detail=f"Failed to parse document '{filename}': {exc!s}",
         )
 
 
@@ -115,12 +114,12 @@ def ingest_text(payload: RawTextInput) -> IngestResponse:
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to ingest text: {str(exc)}",
+            detail=f"Failed to ingest text: {exc!s}",
         )
 
 
-@router.get("/documents", response_model=List[DocumentMetadata])
-def list_documents() -> List[DocumentMetadata]:
+@router.get("/documents", response_model=list[DocumentMetadata])
+def list_documents() -> list[DocumentMetadata]:
     """Retrieve metadata for all ingested documents."""
     return default_store.list_all()
 
@@ -137,8 +136,8 @@ def get_document(doc_id: str) -> Document:
     return doc
 
 
-@router.get("/documents/{doc_id}/chunks", response_model=List[DocumentChunk])
-def get_document_chunks(doc_id: str) -> List[DocumentChunk]:
+@router.get("/documents/{doc_id}/chunks", response_model=list[DocumentChunk])
+def get_document_chunks(doc_id: str) -> list[DocumentChunk]:
     """Retrieve all semantic chunks and tagged metadata for a specific document."""
     doc = default_store.get(doc_id)
     if not doc:

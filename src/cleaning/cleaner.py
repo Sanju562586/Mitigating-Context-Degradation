@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from typing import List, Optional, Tuple
+
 from src.ingestion.models import DocumentElement
 
 
@@ -56,7 +56,7 @@ class DocumentCleaner:
     MARKDOWN_HEADING_REGEX = re.compile(r"^\s*#{1,6}\s+\S+")
     LIST_ITEM_REGEX = re.compile(r"^\s*(?:[-*+]|\d+\.)\s+\S+")
 
-    def clean_elements(self, elements: List[DocumentElement]) -> List[DocumentElement]:
+    def clean_elements(self, elements: list[DocumentElement]) -> list[DocumentElement]:
         """Clean a sequence of DocumentElements produced by format parsers.
 
         1. Identifies running headers and footers across multiple pages.
@@ -70,8 +70,8 @@ class DocumentCleaner:
         # Step 1: Detect recurring page headers/footers across pages
         running_headers, running_footers = self._detect_running_headers_footers(elements)
 
-        cleaned_elements: List[DocumentElement] = []
-        last_heading_content: Optional[str] = None
+        cleaned_elements: list[DocumentElement] = []
+        last_heading_content: str | None = None
 
         for el in elements:
             # Code and table elements are preserved with minimal symbol cleanup
@@ -143,8 +143,8 @@ class DocumentCleaner:
         preserve_tables: bool = True,
         preserve_code: bool = True,
         strip_page_numbers: bool = True,
-        running_headers: Optional[set[str]] = None,
-        running_footers: Optional[set[str]] = None,
+        running_headers: set[str] | None = None,
+        running_footers: set[str] | None = None,
     ) -> str:
         """Sanitize raw document text with boundary protection.
 
@@ -165,7 +165,7 @@ class DocumentCleaner:
 
         # 3. Line-by-line processing respecting code blocks and tables
         lines = text.splitlines()
-        cleaned_lines: List[str] = []
+        cleaned_lines: list[str] = []
         in_code_block = False
 
         for line in lines:
@@ -233,7 +233,7 @@ class DocumentCleaner:
         """Detect if a line is a bullet or numbered list item."""
         return bool(self.LIST_ITEM_REGEX.match(line.strip()))
 
-    def _repair_soft_linebreaks(self, lines: List[str]) -> str:
+    def _repair_soft_linebreaks(self, lines: list[str]) -> str:
         """Merge lines broken mid-sentence by PDF/text extractors while preserving structure.
 
         Rules for NOT merging line A with line B:
@@ -248,7 +248,7 @@ class DocumentCleaner:
         if not lines:
             return ""
 
-        merged: List[str] = []
+        merged: list[str] = []
         i = 0
         n = len(lines)
 
@@ -296,8 +296,8 @@ class DocumentCleaner:
         return "\n".join(merged)
 
     def _detect_running_headers_footers(
-        self, elements: List[DocumentElement]
-    ) -> Tuple[set[str], set[str]]:
+        self, elements: list[DocumentElement]
+    ) -> tuple[set[str], set[str]]:
         """Identify candidate running headers and footers that repeat across pages."""
         page_headers: Counter[str] = Counter()
         page_footers: Counter[str] = Counter()
@@ -319,12 +319,12 @@ class DocumentCleaner:
                 continue
 
             # Top element on page (candidate header)
-            first_lines = [l.strip().lower() for l in el_list[0].content.splitlines() if l.strip()]
+            first_lines = [line_str.strip().lower() for line_str in el_list[0].content.splitlines() if line_str.strip()]
             if first_lines and len(first_lines[0]) < 120:
                 page_headers[first_lines[0]] += 1
 
             # Bottom element on page (candidate footer)
-            last_lines = [l.strip().lower() for l in el_list[-1].content.splitlines() if l.strip()]
+            last_lines = [line_str.strip().lower() for line_str in el_list[-1].content.splitlines() if line_str.strip()]
             if last_lines and len(last_lines[-1]) < 120:
                 page_footers[last_lines[-1]] += 1
 

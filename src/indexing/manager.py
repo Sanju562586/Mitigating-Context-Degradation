@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 from src.indexing.bm25_index import BM25Index
 from src.indexing.embeddings import EmbeddingEngine, default_embedding_engine
@@ -24,8 +24,8 @@ class IndexManager:
 
     def __init__(
         self,
-        storage_dir: Optional[Path] = None,
-        embedding_engine: Optional[EmbeddingEngine] = None,
+        storage_dir: Path | None = None,
+        embedding_engine: EmbeddingEngine | None = None,
     ) -> None:
         self.storage_dir = Path(storage_dir) if storage_dir else Path("data/indexes")
         self.storage_dir.mkdir(parents=True, exist_ok=True)
@@ -38,7 +38,7 @@ class IndexManager:
         self.bm25_index = BM25Index(storage_dir=self.storage_dir)
         self.metadata_store = MetadataStore(storage_dir=self.storage_dir)
 
-    def index_document(self, document: Document) -> Dict[str, Any]:
+    def index_document(self, document: Document) -> dict[str, Any]:
         """Index a document's chunks across Vector Index, BM25 Index, and Metadata Store."""
         chunks = document.chunks
         if not chunks:
@@ -77,7 +77,7 @@ class IndexManager:
         self.bm25_index.remove_document(doc_id)
         self.metadata_store.remove_document(doc_id)
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Retrieve telemetry and counts for all indexes."""
         return {
             "vector_chunks": self.vector_index.total_vectors,

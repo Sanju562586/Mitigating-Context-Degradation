@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from typing import List
 
 # Try importing tiktoken if available, else fallback to standard subword/word regex
 _TIKTOKEN_ENCODER = None
@@ -20,7 +19,7 @@ except ImportError:
 _TOKEN_REGEX = re.compile(r"""(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\w\s]|\w+""")
 
 
-def tokenize(text: str) -> List[str]:
+def tokenize(text: str) -> list[str]:
     """Tokenize text into string tokens."""
     if not text:
         return []

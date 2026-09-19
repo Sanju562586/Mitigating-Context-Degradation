@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
 import numpy as np
+
 # pyrefly: ignore [missing-import]
 from sentence_transformers import SentenceTransformer
 
@@ -23,7 +23,7 @@ class EmbeddingEngine:
 
     def __init__(self, model_name: str = DEFAULT_EMBEDDING_MODEL) -> None:
         self.model_name = model_name
-        self._model: Optional[SentenceTransformer] = None
+        self._model: SentenceTransformer | None = None
 
     @property
     def model(self) -> SentenceTransformer:
@@ -56,7 +56,7 @@ class EmbeddingEngine:
         norms = np.maximum(norms, 1e-12)
         return vectors / norms
 
-    def embed_texts(self, texts: List[str], batch_size: int = 32) -> np.ndarray:
+    def embed_texts(self, texts: list[str], batch_size: int = 32) -> np.ndarray:
         """Embed a list of strings and return L2-normalized float32 vectors."""
         if not texts:
             return np.empty((0, self.dimension), dtype=np.float32)
@@ -74,7 +74,7 @@ class EmbeddingEngine:
         # Guarantee strict L2 normalization
         return self.normalize_l2(vectors)
 
-    def embed_chunks(self, chunks: List[DocumentChunk], batch_size: int = 32) -> np.ndarray:
+    def embed_chunks(self, chunks: list[DocumentChunk], batch_size: int = 32) -> np.ndarray:
         """Extract text from chunks and generate L2-normalized embeddings."""
         if not chunks:
             return np.empty((0, self.dimension), dtype=np.float32)
