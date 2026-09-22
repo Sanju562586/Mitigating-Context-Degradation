@@ -83,7 +83,6 @@ class ContextCompactor:
                 execution_time_ms=round(elapsed_ms, 2),
             )
 
-        original_tokens_total = sum(count_tokens(c.content) for c in chunks)
         seen_sentence_terms: List[Set[str]] = []
         dedup_pruned_total = 0
 
@@ -171,7 +170,18 @@ class ContextCompactor:
                 )
             )
 
-        saved_tokens = max(0, original_tokens_total - total_tokens)
+        # Compute baseline prompt context token count without compaction for true savings metric
+        baseline_blocks = [
+            self.budget_manager.format_evidence_block(
+                citation_tag=item.get("citation_tag", f"[Doc 1, Chunk {pos}]"),
+                text=item["original_text"],
+                metadata=item.get("metadata", {}),
+            )
+            for pos, item in enumerate(accepted_items, start=1)
+        ]
+        baseline_context = "\n\n".join(baseline_blocks)
+        original_context_tokens = count_tokens(baseline_context) if baseline_blocks else 0
+        saved_tokens = max(0, original_context_tokens - total_tokens)
         elapsed_ms = (time.perf_counter() - start_time) * 1000.0
 
         return OptimizedContext(
@@ -179,7 +189,7 @@ class ContextCompactor:
             formatted_prompt_context=formatted_context,
             evidence_items=evidence_items,
             total_tokens=total_tokens,
-            original_tokens=original_tokens_total,
+            original_tokens=original_context_tokens,
             saved_tokens=saved_tokens,
             token_budget=max_token_budget,
             dedup_pruned_count=dedup_pruned_total,

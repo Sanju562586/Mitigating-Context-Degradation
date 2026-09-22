@@ -74,15 +74,19 @@ class SentencePruner:
         term_overlap = len(shared_terms) / max(len(query_terms), 1)
 
         # Factual density boost (digits, currency, percentages, e.g. "20 days", "$500")
-        has_digits = bool(re.search(r"\b\d+\b", sentence))
-        has_currency = bool(re.search(r"[\$\€\£\¥]", sentence))
-        density_boost = 0.2 if (has_digits or has_currency) else 0.0
+        # Only boost factual density if the sentence shares topical terms with the query!
+        density_boost = 0.0
+        if shared_terms:
+            has_digits = bool(re.search(r"\b\d+\b", sentence))
+            has_currency = bool(re.search(r"[\$\€\£\¥%]", sentence))
+            if has_digits or has_currency:
+                density_boost = 0.15
 
         # Jaccard overlap component
         union_len = len(query_terms.union(sentence_terms))
         jaccard = len(shared_terms) / union_len if union_len > 0 else 0.0
 
-        salience = (0.6 * term_overlap) + (0.2 * jaccard) + density_boost
+        salience = (0.7 * term_overlap) + (0.15 * jaccard) + density_boost
         return min(max(salience, 0.0), 1.0)
 
     def prune_chunk(
