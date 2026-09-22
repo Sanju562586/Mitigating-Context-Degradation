@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict
+
 from fastapi import APIRouter, status
 
 from src.retrieval.hybrid import default_hybrid_retriever

@@ -1,6 +1,7 @@
 """Unit and integration tests for Module 3: Hybrid Retrieval & Reciprocal Rank Fusion (RRF)."""
 
 from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -11,10 +12,9 @@ from src.query_processing.models import ConversationTurn, QueryIntent
 from src.retrieval import (
     DenseRetriever,
     HybridRetriever,
-    RRFEngine,
-    RetrievalRequest,
     RetrievalResponse,
     RetrievedCandidate,
+    RRFEngine,
     SparseRetriever,
 )
 
