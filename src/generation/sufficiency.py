@@ -15,6 +15,9 @@ _STOP_WORDS = {
     "what", "where", "when", "why", "how", "who", "which", "whose", "whom",
     "can", "could", "should", "would", "do", "does", "did", "please", "tell",
     "me", "explain", "describe", "detail", "give", "show", "find", "say", "according",
+    "into", "onto", "unto", "within", "without", "through", "over", "under", "above",
+    "below", "between", "among", "during", "before", "after", "across", "behind",
+    "per", "via", "it", "its", "they", "them", "their", "this", "that", "these", "those",
 }
 
 
@@ -39,7 +42,7 @@ class EvidenceSufficiencyClassifier:
     def extract_topic(query: str) -> str:
         """Extract focal topic or target question phrase from the query."""
         cleaned = re.sub(
-            r"^(what|where|when|why|how|who|can you tell me about|please explain|what is the|what are the)\s+",
+            r"^(can you tell me about|please explain|what are the|what is the|what is|what are|where is|where are|who is|who are|how many|how much|what|where|when|why|how|who|is the|are the)\s+",
             "",
             query.strip(),
             flags=re.IGNORECASE,
@@ -136,13 +139,18 @@ class EvidenceSufficiencyClassifier:
         avg_salience = sum(salience_scores) / len(salience_scores) if salience_scores else 0.5
         clamped_salience = max(0.0, min(1.0, avg_salience))
 
-        # Weighted sufficiency score calculation
-        # 60% term coverage + 25% numeric/predicate alignment + 15% retrieval salience
-        sufficiency_score = (
-            0.60 * term_coverage
-            + 0.25 * numeric_alignment
-            + 0.15 * clamped_salience
-        )
+        # Sufficiency score calculation:
+        # Factual term coverage is the core prerequisite for sufficiency. If key query concepts
+        # are largely missing (term_coverage < 0.30), evidence is fundamentally insufficient.
+        if term_coverage < 0.30:
+            sufficiency_score = term_coverage * 0.80
+        else:
+            # Weighted sufficiency score: 65% term coverage + 25% numeric alignment + 10% retrieval salience
+            sufficiency_score = (
+                0.65 * term_coverage
+                + 0.25 * numeric_alignment
+                + 0.10 * clamped_salience
+            )
         sufficiency_score = round(max(0.0, min(1.0, sufficiency_score)), 4)
 
         is_sufficient = sufficiency_score >= tau

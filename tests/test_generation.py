@@ -294,9 +294,10 @@ class TestGenerationApiEndpoints:
         mock_retrieval = RetrievalResponse(
             query="How many vacation leave days are given?",
             processed_query=ProcessedQuery(
-                raw_query="How many vacation leave days are given?",
+                original_query="How many vacation leave days are given?",
                 rewritten_query="How many vacation leave days are given?",
-                intent=QueryIntent.FACTOID,
+                query="How many vacation leave days are given?",
+                intent=QueryIntent.FACTUAL,
             ),
             candidates=[mock_candidate],
             total_candidates=1,
@@ -363,9 +364,10 @@ class TestGenerationApiEndpoints:
         mock_empty_retrieval = RetrievalResponse(
             query="Unknown policy question",
             processed_query=ProcessedQuery(
-                raw_query="Unknown policy question",
+                original_query="Unknown policy question",
                 rewritten_query="Unknown policy question",
-                intent=QueryIntent.FACTOID,
+                query="Unknown policy question",
+                intent=QueryIntent.FACTUAL,
             ),
             candidates=[],
             total_candidates=0,

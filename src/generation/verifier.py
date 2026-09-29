@@ -78,18 +78,35 @@ class AntiHallucinationVerifier:
                     f"Numerical contradiction: claim asserts numbers {unsupported_numbers} conflicting with evidence numbers {ev_numbers}.",
                 )
 
-        # 2. Contradiction Check: Polarity / Negation Flip
-        claim_has_negation = bool(_NEGATIONS & claim_tokens)
-        ev_has_negation = bool(_NEGATIONS & set(re.findall(r"\b\w+\b", ev_lower)))
+        # 2. Contradiction Check: Polarity / Negation Flip on Most Relevant Evidence Sentence
+        ev_sentences = re.split(r"(?<=[.!?])\s+", ev_lower)
+        best_sentence = ""
+        best_overlap = 0
+        for s in ev_sentences:
+            s_words = set(re.findall(r"\b[a-zA-Z0-9_\-\.]{2,}\b", s))
+            ov = len(content_tokens & s_words)
+            if ov > best_overlap:
+                best_overlap = ov
+                best_sentence = s
 
-        # If claim says prohibited while evidence says allowed, or vice versa
-        if (claim_has_negation != ev_has_negation) and len(content_tokens & set(re.findall(r"\b\w+\b", ev_lower))) >= 3:
-            # Polarity inversion on shared topics
-            return (
-                ClaimStatus.CONTRADICTED,
-                0.85,
-                "Polarity contradiction: claim inverts the affirmative/negative constraints of the evidence.",
-            )
+        if best_sentence and best_overlap >= 2:
+            best_sent_tokens = set(re.findall(r"\b\w+\b", best_sentence))
+            claim_has_neg = bool(_NEGATIONS & claim_tokens)
+            best_has_neg = bool(_NEGATIONS & best_sent_tokens)
+            claim_has_aff = bool(_AFFIRMATIVES & claim_tokens)
+            best_has_aff = bool(_AFFIRMATIVES & best_sent_tokens)
+
+            # Contradiction occurs if claim explicitly inverts the polarity of the premise sentence:
+            # E.g. Claim asserts negative ("not allowed") while premise is affirmative ("allowed"),
+            # or Claim asserts affirmative ("permitted") while premise explicitly forbids ("prohibited/cannot").
+            if (claim_has_neg and best_has_aff and not best_has_neg) or (
+                claim_has_aff and best_has_neg and not claim_has_neg
+            ):
+                return (
+                    ClaimStatus.CONTRADICTED,
+                    0.85,
+                    "Polarity contradiction: claim inverts the affirmative/negative constraints of the evidence.",
+                )
 
         # 3. Entailment vs Neutral: Lexical & Semantic Overlap
         ev_words = set(re.findall(r"\b[a-zA-Z0-9_\-\.]{2,}\b", ev_lower))
