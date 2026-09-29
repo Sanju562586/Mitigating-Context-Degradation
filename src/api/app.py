@@ -1,5 +1,7 @@
 """FastAPI Application Entry Point."""
 
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -20,10 +22,20 @@ def create_app() -> FastAPI:
         version="0.1.0",
     )
 
-    # Enable CORS for Next.js frontend communication
+    # Configure CORS origins safely
+    origins_env = os.getenv("ALLOWED_ORIGINS", "")
+    allowed_origins = [
+        origin.strip()
+        for origin in origins_env.split(",")
+        if origin.strip()
+    ] or [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "*"],
+        allow_origins=allowed_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
