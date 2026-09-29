@@ -273,10 +273,74 @@ class TestGenerationApiEndpoints:
         assert "event: sufficiency" in body
         assert "event: done" in body
 
-    def test_api_full_qa_pipeline(self):
-        # Query against existing indexed store
+    def test_api_full_qa_pipeline_grounded(self, monkeypatch):
+        from src.api import generation_routes
+        from src.query_processing.models import ProcessedQuery, QueryIntent
+        from src.reranking.models import RankedContext, RerankedChunk
+        from src.retrieval.models import RetrievalResponse, RetrievedCandidate
+
+        mock_candidate = RetrievedCandidate(
+            chunk_id="chunk_hr_01",
+            content="Employees are granted 20 days of paid annual vacation leave per calendar year [Doc 1, Chunk 0].",
+            document_id="doc_hr",
+            chunk_index=0,
+            metadata={"source": "HR_Policy_2024.pdf", "page": 1},
+            dense_rank=1,
+            sparse_rank=1,
+            dense_score=0.92,
+            sparse_score=12.5,
+            rrf_score=0.032,
+        )
+        mock_retrieval = RetrievalResponse(
+            query="How many vacation leave days are given?",
+            processed_query=ProcessedQuery(
+                raw_query="How many vacation leave days are given?",
+                rewritten_query="How many vacation leave days are given?",
+                intent=QueryIntent.FACTOID,
+            ),
+            candidates=[mock_candidate],
+            total_candidates=1,
+            dense_count=1,
+            sparse_count=1,
+            execution_time_ms=1.2,
+        )
+        mock_ranked = RankedContext(
+            query="How many vacation leave days are given?",
+            chunks=[
+                RerankedChunk(
+                    chunk_id="chunk_hr_01",
+                    content="Employees are granted 20 days of paid annual vacation leave per calendar year.",
+                    document_id="doc_hr",
+                    chunk_index=0,
+                    metadata={"source": "HR_Policy_2024.pdf", "page": 1},
+                    initial_rank=1,
+                    initial_score=0.032,
+                    rerank_score=0.95,
+                    raw_score=4.8,
+                    rerank_position=1,
+                )
+            ],
+            total_input_candidates=1,
+            retained_count=1,
+            pruned_count=0,
+            threshold_applied=0.35,
+            model_name="mock-cross-encoder",
+            execution_time_ms=1.5,
+        )
+
+        monkeypatch.setattr(
+            generation_routes.default_hybrid_retriever,
+            "retrieve",
+            lambda **kwargs: mock_retrieval,
+        )
+        monkeypatch.setattr(
+            generation_routes.default_reranker,
+            "rerank_retrieval_response",
+            lambda **kwargs: mock_ranked,
+        )
+
         payload = {
-            "query": "What is the policy or specification?",
+            "query": "How many vacation leave days are given?",
             "top_k_fused": 10,
             "rerank_top_n": 3,
             "max_token_budget": 1000,
@@ -287,3 +351,59 @@ class TestGenerationApiEndpoints:
         assert "answer" in data
         assert "sufficiency" in data
         assert "grounding_report" in data
+        assert data["abstained"] is False
+        assert len(data["citations"]) > 0
+
+    def test_api_full_qa_pipeline_unseeded_abstains(self, monkeypatch):
+        from src.api import generation_routes
+        from src.query_processing.models import ProcessedQuery, QueryIntent
+        from src.reranking.models import RankedContext
+        from src.retrieval.models import RetrievalResponse
+
+        mock_empty_retrieval = RetrievalResponse(
+            query="Unknown policy question",
+            processed_query=ProcessedQuery(
+                raw_query="Unknown policy question",
+                rewritten_query="Unknown policy question",
+                intent=QueryIntent.FACTOID,
+            ),
+            candidates=[],
+            total_candidates=0,
+            dense_count=0,
+            sparse_count=0,
+            execution_time_ms=0.5,
+        )
+        mock_empty_ranked = RankedContext(
+            query="Unknown policy question",
+            chunks=[],
+            total_input_candidates=0,
+            retained_count=0,
+            pruned_count=0,
+            threshold_applied=0.35,
+            model_name="mock-cross-encoder",
+            execution_time_ms=0.5,
+        )
+
+        monkeypatch.setattr(
+            generation_routes.default_hybrid_retriever,
+            "retrieve",
+            lambda **kwargs: mock_empty_retrieval,
+        )
+        monkeypatch.setattr(
+            generation_routes.default_reranker,
+            "rerank_retrieval_response",
+            lambda **kwargs: mock_empty_ranked,
+        )
+
+        payload = {
+            "query": "What is the policy for orbital rocket launching?",
+            "top_k_fused": 5,
+            "rerank_top_n": 2,
+            "max_token_budget": 1000,
+        }
+        resp = client.post("/api/generate/pipeline/qa", json=payload)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["abstained"] is True
+        assert "The available documents do not contain sufficient evidence" in data["answer"]
+

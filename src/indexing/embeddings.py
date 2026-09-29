@@ -35,6 +35,8 @@ class EmbeddingEngine:
     @property
     def dimension(self) -> int:
         """Return the vector dimensionality (384 for sentence-transformers/all-MiniLM-L6-v2)."""
+        if self._model is None and self.model_name == DEFAULT_EMBEDDING_MODEL:
+            return DEFAULT_DIMENSION
         if hasattr(self.model, "get_embedding_dimension"):
             dim = self.model.get_embedding_dimension()
         else:
