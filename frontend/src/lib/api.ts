@@ -70,3 +70,65 @@ export async function deleteDocumentById(docId: string): Promise<void> {
     throw new Error(`Failed to delete document ${docId}`);
   }
 }
+
+export type ClaimStatus = "entailed" | "neutral" | "contradicted";
+
+export interface SufficiencyAssessment {
+  is_sufficient: boolean;
+  sufficiency_score: number;
+  threshold: number;
+  topic: string;
+  abstention_message?: string;
+  reasoning: string;
+  matched_aspects: string[];
+  missing_aspects: string[];
+}
+
+export interface ClaimVerification {
+  claim_text: string;
+  status: ClaimStatus;
+  confidence: number;
+  cited_sources: string[];
+  entailing_chunk_id?: string;
+  evidence_snippet?: string;
+  reasoning?: string;
+}
+
+export interface GroundingReport {
+  faithfulness_score: number;
+  hallucination_detected: boolean;
+  total_claims: number;
+  entailed_claims_count: number;
+  neutral_claims_count: number;
+  contradicted_claims_count: number;
+  claims: ClaimVerification[];
+  verified_citations: string[];
+  unverified_citations: string[];
+}
+
+export interface GroundedAnswerResponse {
+  query: string;
+  answer: string;
+  abstained: boolean;
+  abstention_reason?: string;
+  sufficiency: SufficiencyAssessment;
+  grounding_report: GroundingReport;
+  citations: string[];
+  latency_ms: number;
+  model_name: string;
+}
+
+export async function submitQuestion(query: string): Promise<GroundedAnswerResponse> {
+  const res = await fetch(`${API_BASE_URL}/api/generate/pipeline/qa`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query }),
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(
+      errorData.detail || "Failed to generate grounded answer"
+    );
+  }
+  return res.json();
+}
