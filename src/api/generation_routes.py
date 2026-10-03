@@ -221,12 +221,27 @@ def compare_naive_vs_grounded(payload: FullQAPipelineRequest) -> ComparisonRespo
     1. Naive baseline LLM (direct ungrounded generation)
     2. Full Grounded Mitigation Pipeline (Retrieval + Rerank + Compaction + Gate + Citations + NLI Verification)
     """
-    # 1. Run Grounded Pipeline
+    # 1. Run Grounded Pipeline (the complete multi-stage mitigation pipeline)
     grounded_res = run_full_qa_pipeline(payload)
 
-    # 2. Run Naive Baseline
+    # 2. Extract entire document text for Naive LLM (monolithic prompt baseline)
+    from src.ingestion.store import default_store
+
+    entire_document_text = ""
+    if payload.filters and "document_id" in payload.filters:
+        doc = default_store.get(payload.filters["document_id"])
+        if doc and doc.content:
+            entire_document_text = doc.content
+
+    if not entire_document_text:
+        all_docs = default_store.list_all_documents()
+        if all_docs:
+            entire_document_text = "\n\n".join(d.content for d in all_docs if d.content)
+
+    # 3. Run Naive Baseline with the ENTIRE document and the query directly
     naive_res = default_grounded_generator.generate_naive(
         query=payload.query,
+        document_text=entire_document_text,
         provider=payload.provider,
     )
 

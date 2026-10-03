@@ -267,14 +267,140 @@ class OpenAICompatibleEngine(BaseInferenceEngine):
                             continue
 
 
+class AnthropicEngine(BaseInferenceEngine):
+    """Client for Anthropic Claude inference API (LLM Provider Layer: Claude)."""
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model_name: str | None = None,
+    ) -> None:
+        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY", "")
+        self._model_name = model_name or os.getenv("ANTHROPIC_MODEL_NAME", "claude-3-5-sonnet-20241022")
+
+    @property
+    def model_name(self) -> str:
+        return self._model_name
+
+    def generate(
+        self,
+        prompt: str,
+        system_prompt: str,
+        temperature: float = 0.0,
+        max_tokens: int = 1024,
+    ) -> str:
+        if not self.api_key:
+            return OfflineGroundedEngine(model_name=f"{self._model_name}-offline").generate(
+                prompt=prompt, system_prompt=system_prompt, temperature=temperature, max_tokens=max_tokens
+            )
+        import httpx
+
+        headers = {
+            "x-api-key": self.api_key,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": self._model_name,
+            "system": system_prompt,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        with httpx.Client(timeout=60.0) as client:
+            resp = client.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            return data["content"][0]["text"]
+
+    def generate_stream(
+        self,
+        prompt: str,
+        system_prompt: str,
+        temperature: float = 0.0,
+        max_tokens: int = 1024,
+    ) -> Iterator[str]:
+        full_text = self.generate(
+            prompt=prompt, system_prompt=system_prompt, temperature=temperature, max_tokens=max_tokens
+        )
+        tokens = re.findall(r"\S+\s*", full_text)
+        yield from tokens
+
+
+class GeminiEngine(BaseInferenceEngine):
+    """Client for Google Gemini inference API (LLM Provider Layer: Gemini)."""
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model_name: str | None = None,
+    ) -> None:
+        self.api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY", "")
+        self._model_name = model_name or os.getenv("GEMINI_MODEL_NAME", "gemini-1.5-flash")
+
+    @property
+    def model_name(self) -> str:
+        return self._model_name
+
+    def generate(
+        self,
+        prompt: str,
+        system_prompt: str,
+        temperature: float = 0.0,
+        max_tokens: int = 1024,
+    ) -> str:
+        if not self.api_key:
+            return OfflineGroundedEngine(model_name=f"{self._model_name}-offline").generate(
+                prompt=prompt, system_prompt=system_prompt, temperature=temperature, max_tokens=max_tokens
+            )
+        import httpx
+
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self._model_name}:generateContent?key={self.api_key}"
+        payload = {
+            "system_instruction": {"parts": [{"text": system_prompt}]},
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": temperature,
+                "maxOutputTokens": max_tokens,
+            },
+        }
+        with httpx.Client(timeout=60.0) as client:
+            resp = client.post(url, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+
+    def generate_stream(
+        self,
+        prompt: str,
+        system_prompt: str,
+        temperature: float = 0.0,
+        max_tokens: int = 1024,
+    ) -> Iterator[str]:
+        full_text = self.generate(
+            prompt=prompt, system_prompt=system_prompt, temperature=temperature, max_tokens=max_tokens
+        )
+        tokens = re.findall(r"\S+\s*", full_text)
+        yield from tokens
+
+
 class EngineFactory:
-    """Factory creating appropriate inference engine based on provider configuration."""
+    """Factory creating appropriate inference engine matching LLM Provider Layer (Ollama, ChatGPT, Claude, Gemini)."""
 
     @staticmethod
     def create_engine(provider: str | None = None) -> BaseInferenceEngine:
         selected = (provider or os.getenv("LLM_PROVIDER", "offline")).lower()
-        if selected in ("openai", "ollama", "vllm"):
+        if selected in ("ollama",):
+            return OpenAICompatibleEngine(
+                base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
+                model_name=os.getenv("OLLAMA_MODEL_NAME", "llama3.2"),
+            )
+        if selected in ("chatgpt", "openai", "vllm"):
             return OpenAICompatibleEngine()
+        if selected in ("claude", "anthropic"):
+            return AnthropicEngine()
+        if selected in ("gemini", "google"):
+            return GeminiEngine()
         return OfflineGroundedEngine()
 
 

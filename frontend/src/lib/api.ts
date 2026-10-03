@@ -139,12 +139,14 @@ export interface ComparisonResponse {
 export async function submitQuestionComparison(
   query: string,
   sessionId?: string,
-  documentId?: string
+  documentId?: string,
+  provider?: string
 ): Promise<ComparisonResponse> {
   const payload: {
     query: string;
     session_id?: string;
     filters?: Record<string, string>;
+    provider?: string;
   } = { query };
 
   if (sessionId) {
@@ -152,6 +154,9 @@ export async function submitQuestionComparison(
   }
   if (documentId && documentId !== "all") {
     payload.filters = { document_id: documentId };
+  }
+  if (provider && provider !== "offline") {
+    payload.provider = provider;
   }
 
   const res = await fetch(`${API_BASE_URL}/api/generate/compare`, {

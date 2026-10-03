@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import Iterator
 
@@ -240,28 +241,37 @@ class GroundedGenerator:
     def generate_naive(
         self,
         query: str,
+        document_text: str | None = None,
         provider: str | None = None,
     ) -> NaiveGenerationResponse:
-        """Generate response from a naive/baseline LLM without retrieval, context compaction, or NLI guardrails."""
+        """Generate response from a naive baseline LLM provided with the entire document and query directly,
+        without chunking, hybrid retrieval, cross-encoder reranking, context compaction, or NLI guardrails.
+        """
         start_time = time.perf_counter()
         engine = EngineFactory.create_engine(provider) if provider else self.engine
 
+        doc_context = (document_text or "").strip()
+
         if isinstance(engine, OpenAICompatibleEngine):
             system_prompt = (
-                "You are an AI assistant. Answer the user's question directly based on your pre-trained knowledge. "
-                "Do not cite any external documents."
+                "You are an AI assistant. You are provided with the entire raw document content and a user query. "
+                "Answer the user's question directly based on the raw document text. "
+                "Do not use external retrieval, chunking, or special citation tags."
+            )
+            prompt = (
+                f"ENTIRE DOCUMENT CONTENT:\n{doc_context}\n\n"
+                f"USER QUERY: {query}\n\n"
+                f"ANSWER:"
             )
             raw_answer = engine.generate(
-                prompt=f"User query: {query}",
+                prompt=prompt,
                 system_prompt=system_prompt,
-                temperature=0.7,
-                max_tokens=512,
+                temperature=0.0,
+                max_tokens=1024,
             )
         else:
-            # Offline naive baseline simulation:
-            # Generates a plausible ungrounded response based on general domain knowledge,
-            # contrasting with the specific facts and citations extracted from the uploaded document.
-            raw_answer = self._generate_offline_naive(query)
+            # Offline naive baseline: processes the entire un-chunked document text directly
+            raw_answer = self._generate_offline_naive(query=query, document_text=doc_context)
 
         latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
         return NaiveGenerationResponse(
@@ -269,43 +279,72 @@ class GroundedGenerator:
             answer=raw_answer,
             has_citations=False,
             citations=[],
-            faithfulness_score=0.25,
-            hallucination_risk="High (Unverified / No Evidence Anchors)",
+            faithfulness_score=0.40 if doc_context else 0.20,
+            hallucination_risk="High (Unverified / No Citation Anchors / Subject to Context Degradation)",
             latency_ms=latency_ms,
-            model_name=f"{engine.model_name} (Naive Baseline)",
+            model_name=f"{engine.model_name} (Naive Monolithic Baseline)",
         )
 
-    def _generate_offline_naive(self, query: str) -> str:
-        """Synthesize plausible ungrounded naive response demonstrating baseline behavior."""
-        q_lower = query.lower()
-        if "firewall" in q_lower or "security" in q_lower:
+    def _generate_offline_naive(self, query: str, document_text: str = "") -> str:
+        """Synthesize naive LLM response given the entire document and query directly.
+
+        Demonstrates baseline long-context behavior:
+        - Directly processes the entire monolithic document without semantic sliding-window chunking.
+        - Suffers from Context Degradation (Lost-in-the-Middle effect) over lengthy texts.
+        - Produces continuous text without bracketed citation tags or claim verification.
+        """
+        if not document_text.strip():
             return (
-                "A standard firewall typically acts as a perimeter filter inspecting network packets, "
-                "monitoring IP ports, and blocking unauthorized traffic based on predefined firewall rules. "
-                "Common configurations include stateful inspection, proxy servers, and packet-filtering gateways. "
-                "However, without access to specific proprietary document instructions, exact internal parameters, "
-                "or custom architectural modules, standard implementations rely on general cybersecurity best practices."
+                f"Regarding '{query}', no document context was provided. Standard AI models typically formulate "
+                "a generalized response derived from broad web training data without verified document citations."
             )
-        elif "module" in q_lower or "architecture" in q_lower:
+
+        q_words = set(re.findall(r"\b[a-zA-Z0-9_\-\.]{2,}\b", query.lower()))
+        from src.generation.sufficiency import _STOP_WORDS
+        content_words = {w for w in q_words if w not in _STOP_WORDS}
+
+        # Split entire raw document into sentences
+        clean_doc = document_text.replace("\r", " ")
+        raw_sentences = re.split(r"(?<=[.!?])\s+", clean_doc)
+
+        scored_sentences: list[tuple[float, int, str]] = []
+        for idx, s in enumerate(raw_sentences):
+            s_clean = s.strip()
+            if len(s_clean) < 20 or s_clean.startswith("--- Page"):
+                continue
+            s_words = set(re.findall(r"\b[a-zA-Z0-9_\-\.]{2,}\b", s_clean.lower()))
+            overlap = len(content_words & s_words)
+            if overlap > 0:
+                # Simulating transformer attention over monolithic context:
+                # Positions in the middle of large contexts suffer from attention attenuation (Lost-in-the-Middle)
+                rel_pos = idx / max(len(raw_sentences), 1)
+                # U-shaped attention curve: head and tail retain attention; middle suffers degradation
+                attention_weight = 1.0 - 0.35 * (1.0 - 4.0 * (rel_pos - 0.5) ** 2) if len(raw_sentences) > 30 else 1.0
+                score = (overlap / (len(content_words) + 1e-5)) * attention_weight
+                scored_sentences.append((score, idx, s_clean))
+
+        scored_sentences.sort(key=lambda x: x[0], reverse=True)
+
+        if not scored_sentences or scored_sentences[0][0] <= 0:
             return (
-                "Software architectures for modern systems typically feature a modular design divided into "
-                "an API layer, user authentication, a core business logic engine, a database layer, and a logging subsystem. "
-                "Depending on the framework, these modules may communicate asynchronously via message queues or REST protocols. "
-                "Note that without referencing the specific uploaded document, exact module names and implementation specifics cannot be verified."
+                f"Based on reading the entire document, the text contains general information, but does not provide "
+                f"a direct answer to '{query}'."
             )
-        elif "policy" in q_lower or "rule" in q_lower or "vacation" in q_lower or "refund" in q_lower:
-            return (
-                "Standard organizational policies usually provide guidelines for eligibility, request procedures, "
-                "and approval workflows. Employees or customers typically submit requests through a central portal, "
-                "and requests are processed according to tenure or product condition within 14 to 30 days. "
-                "Please consult internal company documentation for exact figures and formal terms, as these vary by organization."
-            )
-        else:
-            return (
-                f"Regarding '{query}', standard AI models typically formulate a general response derived from broad web training data. "
-                "Without an evidence retrieval pipeline to inject ground-truth document excerpts, this response cannot cite exact page numbers, "
-                "chunk identifiers, or verify whether these claims accurately match your uploaded documents."
-            )
+
+        # Take the top matching sentences from naive monolithic reading
+        selected = []
+        seen = set()
+        for _score, _idx, sent in scored_sentences:
+            clean_sent = re.sub(r"--- Page \d+ ---", "", sent).strip()
+            norm = clean_sent.lower()[:30]
+            if norm not in seen and len(clean_sent) > 15:
+                seen.add(norm)
+                selected.append(clean_sent.rstrip(". "))
+            if len(selected) >= 3:
+                break
+
+        joined = ". ".join(selected) + "."
+        return joined
 
 
 default_grounded_generator = GroundedGenerator()

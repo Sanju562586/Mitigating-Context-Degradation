@@ -34,6 +34,7 @@ export function GroundedQA({
 }: GroundedQAProps) {
   const [query, setQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [provider, setProvider] = useState("offline");
   const [comparison, setComparison] = useState<ComparisonResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showUploadZone, setShowUploadZone] = useState(false);
@@ -50,7 +51,8 @@ export function GroundedQA({
       const res = await submitQuestionComparison(
         query.trim(),
         undefined,
-        selectedDocId || undefined
+        selectedDocId || undefined,
+        provider
       );
       setComparison(res);
     } catch (err: unknown) {
@@ -90,9 +92,9 @@ export function GroundedQA({
   return (
     <div className="space-y-6 max-w-6xl mx-auto">
       {/* ==================================================================== */}
-      {/* 1. DOCUMENT BAR (MINIMAL & INTUITIVE)                                */}
+      {/* 1. DOCUMENT & PROVIDER BAR (ORCHESTRATOR)                           */}
       {/* ==================================================================== */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm">
         <div className="flex items-center gap-3">
           <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-400">
             <FileText className="w-5 h-5" />
@@ -123,21 +125,39 @@ export function GroundedQA({
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
               {selectedDoc
-                ? `Active: ${selectedDoc.title} (${selectedDoc.chunk_count} chunks)`
+                ? `Active: ${selectedDoc.title} (${selectedDoc.chunk_count} chunks • 220 words + 30 overlap)`
                 : documents.length > 0
-                ? "Searching across all uploaded documents"
+                ? "Full corpus index (FAISS + BM25)"
                 : "Upload a document to compare grounded responses"}
             </p>
           </div>
         </div>
 
-        <button
-          onClick={() => setShowUploadZone(!showUploadZone)}
-          className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition self-start sm:self-auto shrink-0"
-        >
-          <UploadCloud className="w-4 h-4 text-indigo-400" />
-          {showUploadZone ? "Close Uploader" : "Upload Document"}
-        </button>
+        <div className="flex items-center gap-3">
+          {/* LLM Provider Selector from Architecture Diagram */}
+          <div className="flex items-center gap-2 bg-slate-950/80 border border-slate-800 px-3 py-1.5 rounded-lg">
+            <span className="text-xs text-slate-400 font-medium">LLM Engine:</span>
+            <select
+              value={provider}
+              onChange={(e) => setProvider(e.target.value)}
+              className="bg-transparent text-xs text-indigo-300 font-semibold focus:outline-none cursor-pointer"
+            >
+              <option value="offline" className="bg-slate-900 text-slate-200">Offline (Deterministic)</option>
+              <option value="ollama" className="bg-slate-900 text-slate-200">Ollama (Local LLM)</option>
+              <option value="chatgpt" className="bg-slate-900 text-slate-200">ChatGPT (OpenAI)</option>
+              <option value="claude" className="bg-slate-900 text-slate-200">Claude (Anthropic)</option>
+              <option value="gemini" className="bg-slate-900 text-slate-200">Gemini (Google)</option>
+            </select>
+          </div>
+
+          <button
+            onClick={() => setShowUploadZone(!showUploadZone)}
+            className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition shrink-0"
+          >
+            <UploadCloud className="w-4 h-4 text-indigo-400" />
+            {showUploadZone ? "Close Uploader" : "Upload Document"}
+          </button>
+        </div>
       </div>
 
       {/* Upload Zone Modal / Drawer */}
@@ -217,17 +237,19 @@ export function GroundedQA({
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* ---------------------------------------------------------------- */}
-            {/* LEFT: NAIVE LLM                                                  */}
+            {/* LEFT: NAIVE LLM (ENTIRE RAW DOCUMENT PROMPT)                     */}
             {/* ---------------------------------------------------------------- */}
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between space-y-4">
               <div className="space-y-3">
                 <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                   <div className="flex items-center gap-2">
                     <Bot className="w-4 h-4 text-slate-400" />
-                    <span className="font-semibold text-sm text-slate-200">Naive LLM</span>
+                    <span className="font-semibold text-sm text-slate-200">
+                      Naive LLM (Entire Document)
+                    </span>
                   </div>
                   <span className="text-[11px] font-medium px-2 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">
-                    Ungrounded
+                    Raw Document Dump
                   </span>
                 </div>
 
@@ -237,19 +259,21 @@ export function GroundedQA({
               </div>
 
               <div className="pt-3 border-t border-slate-800/60 text-xs text-slate-500 flex items-center gap-1.5">
-                <span>⚠️ Direct generation without document citations or verification.</span>
+                <span>⚠️ Directly prompted with entire raw document &amp; query. No chunking, ungrounded.</span>
               </div>
             </div>
 
             {/* ---------------------------------------------------------------- */}
-            {/* RIGHT: OUR APPLICATION (GROUNDED)                                */}
+            {/* RIGHT: OUR APPLICATION (FULL PROCESSING PIPELINE)                */}
             {/* ---------------------------------------------------------------- */}
             <div className="bg-slate-900 border border-indigo-900/40 rounded-xl p-5 flex flex-col justify-between space-y-4 shadow-sm">
               <div className="space-y-3">
                 <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                   <div className="flex items-center gap-2">
                     <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                    <span className="font-semibold text-sm text-white">Our Application</span>
+                    <span className="font-semibold text-sm text-white">
+                      Our Application (Full Pipeline)
+                    </span>
                   </div>
                   <span className="text-[11px] font-medium px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                     Grounded &amp; Verified
@@ -262,7 +286,7 @@ export function GroundedQA({
               </div>
 
               <div className="pt-3 border-t border-slate-800/60 text-xs text-emerald-400/90 flex items-center justify-between">
-                <span>✓ Verified with document evidence</span>
+                <span>✓ Ingestion (220 words + 30 overlap) • Hybrid Retrieval (FAISS + BM25) • Context Assembly • Grounded LLM</span>
                 {grounded.citations.length > 0 && (
                   <span className="text-slate-400 text-[11px]">
                     {grounded.citations.length} citations

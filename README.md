@@ -43,34 +43,54 @@ This repository implements a **multi-stage evidence retrieval, context optimizat
 ## 🏛️ System Architecture
 
 <p align="center">
-  <img src="docs/assets/system_architecture.svg" alt="High-Level System Architecture Diagram" width="100%" />
+  <img src="docs/assets/system_architecture.png" alt="High-Level System Architecture Diagram" width="100%" />
 </p>
 
-The system is organized into four decoupled architectural tiers:
+The system architecture is structured into decoupled, high-performance layers centered around the **External Memory System (Orchestrator)**:
 
-1. **Presentation & Client Tier**:
-   - **Interactive Web Dashboard**: React 18 / Vite single-page application with real-time context visualization, NLI claim inspection, and memory controls.
-   - **Chromium Browser Extension**: Manifest V3 extension providing background context capture, active tab DOM scraping, and bidirectional episodic sync.
-   - **External Clients & SDKs**: REST API consumers, CLI clients, and Server-Sent Events (SSE) token stream listeners.
+### 1. Frontend Layer
+- **Context Rot Workspace (React/Vite / Next.js)**: Clean, intuitive workspace enabling document ingestion, query submission, and real-time response inspection.
+- **Side-by-Side Comparison**: Concurrently compares responses from the **Naive LLM** (prompted directly with the entire monolithic document) versus **Our Application Pipeline** (grounded with hybrid retrieval, context compaction, and verified citations).
+- **Upload Document & User Query**: Intuitive drag-and-drop file ingestion and natural language query interface.
 
-2. **API Gateway & Orchestration Layer**:
-   - **FastAPI Gateway**: High-throughput asynchronous routing, Pydantic V2 validation, and rate-limiting middleware.
-   - **Streaming Emitter**: Server-Sent Events (SSE) controller streaming token-by-token generation and live guardrail telemetry.
-   - **Session & Access Controller**: Manages session lifecycles, user isolation, and granular memory permissions (Read/Write/Erase).
-   - **Async Task Dispatcher**: Dispatches background operations such as hierarchical summary condensation and index re-compilation.
+### 2. Application Layer — External Memory System (Orchestrator)
+- **1. Ingestion Module**:
+  - `File Loader`: Multi-format parsers for PDF, DOCX, TXT, MD, and HTML.
+  - `Text Splitter`: Structural normalization and boundary-aware decomposition.
+  - `Word based chunking (220 size + 30 overlap)`: Strict sliding window chunking producing cohesive 220-word units with 30-word boundary overlaps to eliminate context seams.
+  - `Store Vectors`: Automatically writes vectorized representations into the external FAISS index.
+- **2. Retrieval Module**:
+  - `Query Processor`: Intent classification, conversational rewriting, and metadata filter extraction.
+  - `Embedding Model`: Dense semantic vector representations via `SentenceTransformers` (`all-MiniLM-L6-v2`).
+  - `Hybrid Retriever (FAISS + BM25)`: Parallel dual-retrieval combining dense vector cosine similarity with sparse lexical BM25, arbitrated via Reciprocal Rank Fusion ($RRF$).
+- **3. Context Assembly**:
+  - `Context Reconstructor (Query + Retrieved Chunks)`: Cross-encoder reranking, salience sentence pruning, and Lost-in-the-Middle boundary reordering.
+  - `Vector similarity Search`: Real-time proximity searches over the index corpus.
+  - `SentenceTransformers`: Dynamic context scoring and semantic deduplication ($\tau \ge 0.85$).
+- **4. LLM Generation Module**:
+  - `Prompt Builder`: Synthesizes evidence-grounded prompt templates enforcing mandatory bracketed citations (`[Doc X, Chunk Y]`).
+  - `LLM Inference`: Dispatches requests to the configured model in the LLM Provider Layer.
+  - `Response Parser`: Parses generated assertions, extracts citations, and verifies claims via sentence-level NLI.
+  - `Update Memory`: Writes verified episodic interactions and persistent summaries to long-term storage.
 
-3. **Core Intelligence & Engine Tier**:
-   - **Multimodal Ingestion & Indexing**: Structural file parsing (PDF, DOCX, TXT, HTML), semantic sliding-window chunking (512 tokens / 128 overlap), dense vector encoding (`all-MiniLM-L6-v2`), and BM25 sparse inverted indexing.
-   - **Hybrid Retrieval & RRF Fusion**: Query intent classification and acronym expansion, dual vector search (FAISS `IndexFlatIP`) + BM25 lexical search, arbitrated via Reciprocal Rank Fusion ($RRF(d) = \sum \frac{1}{60 + r_i(d)}$).
-   - **Context Compaction & Optimization**: Joint query-document cross-attention reranking (`ms-marco-MiniLM-L-6-v2`), extractive salience pruning, semantic cosine deduplication ($\tau \ge 0.85$), and Lost-in-the-Middle boundary reordering.
-   - **Evidence Gating & Grounded Generation**: Pre-flight semantic coverage gate ($\theta$ threshold) with Truthful Abstention Protocol, bracketed citation synthesis, streaming LLM inference, and sentence-level NLI claim verification (*Entailed*, *Neutral*, *Contradicted*).
-   - **External Memory & Client Sync**: Session state registry, episodic vector store for cross-session semantic recall, recursive hierarchical summarizer, and client synchronizer.
+### 3. LLM Provider Layer
+- **LLM Inference ("Generate Response using Context")**:
+  - **Ollama**: Local, private on-device LLM execution (e.g., Llama 3.2, Mistral).
+  - **ChatGPT**: OpenAI API models (`gpt-4o`, `gpt-4o-mini`).
+  - **Claude**: Anthropic API models (`claude-3-5-sonnet`, `claude-3-haiku`).
+  - **Gemini**: Google GenAI models (`gemini-1.5-pro`, `gemini-1.5-flash`).
+  - **Offline Grounded Synthesizer**: High-speed, deterministic offline inference without external keys or network dependencies.
 
-4. **Data & Persistence Tier**:
-   - **Dense Vector Stores**: FAISS indices for document corpus (`index_corpus.faiss`) and episodic user memory (`memory.faiss`).
-   - **Sparse Lexical Stores**: BM25 inverted term index, vocabulary postings, and document frequency tables (`bm25.pkl`).
-   - **Relational Database**: ACID-compliant SQLite with WAL mode indexing sessions, conversation turns, hierarchical summaries, and audit logs.
-   - **Document Repository**: Structured JSON chunk store, citation anchor offsets, and source document provenance.
+### 4. External Memory (Vector Database)
+- **FAISS Index**:
+  - `Embeddings`: L2-normalized dense embeddings for instant vector similarity lookup.
+  - `Chunks`: Granular text chunks (220-word windows) mapped to citation tags.
+  - `Metadata`: Provenance tracking including source titles, page numbers, heading paths, and offsets.
+
+### 5. Storage Tier
+- **FAISS Index Files**: Serialized binary index files (`index_corpus.faiss`, `memory.faiss`).
+- **Metadata (JSON/DB)**: ACID-compliant SQLite (`memory.db`) with WAL mode tracking sessions, episodic turns, and document registry.
+- **Logs & Configs**: Audit logs, guardrail telemetry, and system configuration files.
 
 ---
 
@@ -139,13 +159,12 @@ The system is organized into four decoupled architectural tiers:
 
 ## 💻 Interactive User Interfaces
 
-### 1. Grounded Q&A Interface
-- Interactive query console with real-time streaming or synchronous inference.
-- **Sufficiency Meter:** Displays sufficiency score, verdict badge, and topic classification.
-- **Grounded Answer / Abstention Banner:** Highlights whether evidence allowed answering or triggered safe abstention.
-- **Claim Verification Breakdown:** Interactive badges showing Entailed, Neutral, and Contradicted propositions.
-- **Citation Provenance:** Direct links between bracketed citations and source document excerpts.
-- **Telemetry Panel:** Token savings, compression ratio, retrieval latency, and model provenance.
+### 1. Side-by-Side Comparison Interface (Context Rot Workspace)
+- **Side-by-Side Evaluation**: Concurrently evaluates the exact same query on the uploaded document using two distinct architectures:
+  1. **Naive LLM (Entire Document)**: Provided directly with the full raw document and query. Subject to context degradation, attention decay (Lost-in-the-Middle), and unverified assertions.
+  2. **Our Application (Full Pipeline)**: Processed through the entire multi-stage pipeline: Ingestion (220 words + 30 overlap) $\rightarrow$ Hybrid Retrieval (FAISS + BM25) $\rightarrow$ Context Assembly $\rightarrow$ Grounded LLM Generation with bracketed citations $\rightarrow$ Memory Update.
+- **Minimalist, Clutter-Free Presentation**: Clear side-by-side cards highlighting grounded responses with verified citation tags (`[Doc 1, Chunk 0]`).
+- **Flexible LLM Provider Engine**: Seamlessly switch inference between Ollama, ChatGPT, Claude, Gemini, or deterministic Offline execution.
 
 ### 2. Document Ingestion & Deep Inspector
 - Drag-and-drop document upload for PDF, Word, Markdown, Plain Text, and HTML.
