@@ -1,7 +1,3 @@
-# ==============================================================================
-# LLM Hallucination Mitigation & Context Degradation Pipeline — Python Requirements
-# Project: Mitigating Hallucination and Context Degradation in LLMs Using Hybrid Retrieval
-# ==============================================================================
 
 # Core API & Web Server
 fastapi>=0.115.0

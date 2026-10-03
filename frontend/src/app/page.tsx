@@ -201,7 +201,12 @@ export default function IngestionPage() {
         </div>
 
         {activeTab === "qa" ? (
-          <GroundedQA />
+          <GroundedQA
+            documents={documents}
+            selectedDocId={selectedDocId}
+            onSelectDocId={setSelectedDocId}
+            onUploadSuccess={handleIngestSuccess}
+          />
         ) : activeTab === "memory" ? (
           <CrossSessionMemory />
         ) : (

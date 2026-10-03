@@ -151,6 +151,26 @@ class CrossEncoderReranker:
             if len(retained_chunks) >= n:
                 break
 
+        # Fallback safety: If no candidates exceed tau but candidates exist with non-trivial score,
+        # retain the top candidate to allow downstream sufficiency gating to evaluate context
+        if not retained_chunks and scored_candidates and scored_candidates[0]["rerank_score"] >= 0.05:
+            top_item = scored_candidates[0]
+            c = top_item["candidate"]
+            retained_chunks.append(
+                RerankedChunk(
+                    chunk_id=c.chunk_id,
+                    content=c.content,
+                    document_id=c.document_id,
+                    chunk_index=c.chunk_index,
+                    metadata=c.metadata,
+                    initial_rank=top_item["initial_rank"],
+                    initial_score=top_item["initial_score"],
+                    rerank_score=round(top_item["rerank_score"], 4),
+                    raw_score=round(top_item["raw_score"], 4),
+                    rerank_position=1,
+                )
+            )
+
         pruned_count = total_input - len(retained_chunks)
         elapsed_ms = (time.perf_counter() - start_time) * 1000.0
 

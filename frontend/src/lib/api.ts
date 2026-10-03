@@ -118,10 +118,22 @@ export interface GroundedAnswerResponse {
   model_name: string;
 }
 
-export async function submitQuestion(query: string, sessionId?: string): Promise<GroundedAnswerResponse> {
-  const payload: { query: string; session_id?: string } = { query };
+export async function submitQuestion(
+  query: string,
+  sessionId?: string,
+  documentId?: string
+): Promise<GroundedAnswerResponse> {
+  const payload: {
+    query: string;
+    session_id?: string;
+    filters?: Record<string, string>;
+  } = { query };
+
   if (sessionId) {
     payload.session_id = sessionId;
+  }
+  if (documentId && documentId !== "all") {
+    payload.filters = { document_id: documentId };
   }
 
   const res = await fetch(`${API_BASE_URL}/api/generate/pipeline/qa`, {
