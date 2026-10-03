@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
+import { GroundedQA } from "@/components/GroundedQA";
 import { Navbar } from "@/components/Navbar";
 import { UploadZone } from "@/components/UploadZone";
 import { DocumentList } from "@/components/DocumentList";
@@ -13,9 +14,10 @@ import {
   fetchDocuments,
 } from "@/lib/api";
 import { Document, DocumentMetadata, HealthStatus } from "@/types/ingestion";
-import { Sparkles } from "lucide-react";
+import { FileText, MessageSquareQuote, Sparkles } from "lucide-react";
 
 export default function IngestionPage() {
+  const [activeTab, setActiveTab] = useState<"ingestion" | "qa">("qa");
   const [backendHealth, setBackendHealth] = useState<HealthStatus | null>(null);
   const [healthError, setHealthError] = useState(false);
   const [documents, setDocuments] = useState<DocumentMetadata[]>([]);
@@ -137,47 +139,80 @@ export default function IngestionPage() {
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-8 space-y-8">
-        {/* Page Header */}
+        {/* Page Header & Tabs */}
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-slate-900 pb-5">
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-semibold mb-2.5">
               <Sparkles className="h-3.5 w-3.5" />
-              Document Knowledge Base
+              Hallucination Mitigation Pipeline
             </div>
             <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">
-              Documents & Metadata
+              {activeTab === "qa" ? "Grounded Q&A & Verification" : "Documents & Ingestion"}
             </h1>
             <p className="mt-1.5 text-sm text-slate-400 max-w-2xl leading-relaxed">
-              Upload and manage reference documents. View document briefs, key metadata, and chunk breakdowns.
+              {activeTab === "qa"
+                ? "Ask questions with verifiable citations, inspect evidence sufficiency gates, and observe safe abstentions."
+                : "Upload and manage reference documents. View document briefs, key metadata, and chunk breakdowns."}
             </p>
           </div>
+
+          <div className="flex items-center gap-2 bg-slate-900/90 border border-slate-800 p-1 rounded-xl">
+            <button
+              onClick={() => setActiveTab("qa")}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium transition ${
+                activeTab === "qa"
+                  ? "bg-indigo-600 text-white shadow-sm"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <MessageSquareQuote className="w-4 h-4" />
+              Grounded Q&A
+            </button>
+            <button
+              onClick={() => setActiveTab("ingestion")}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium transition ${
+                activeTab === "ingestion"
+                  ? "bg-indigo-600 text-white shadow-sm"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <FileText className="w-4 h-4" />
+              Ingestion & Docs
+            </button>
+          </div>
         </div>
 
-        {/* Upload Zone */}
-        <UploadZone onIngestSuccess={handleIngestSuccess} />
+        {activeTab === "qa" ? (
+          <GroundedQA />
+        ) : (
+          <>
+            {/* Upload Zone */}
+            <UploadZone onIngestSuccess={handleIngestSuccess} />
 
-        {/* Repository & Deep Inspector Split View */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* Document List Sidebar (4 cols) */}
-          <div className="lg:col-span-4">
-            <DocumentList
-              documents={documents}
-              selectedDocId={selectedDocId}
-              onSelectDocument={setSelectedDocId}
-              onDeleteDocument={handleDeleteDocument}
-              onRefresh={loadHealthAndDocs}
-              isLoading={isLoadingDocs}
-            />
-          </div>
+            {/* Repository & Deep Inspector Split View */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              {/* Document List Sidebar (4 cols) */}
+              <div className="lg:col-span-4">
+                <DocumentList
+                  documents={documents}
+                  selectedDocId={selectedDocId}
+                  onSelectDocument={setSelectedDocId}
+                  onDeleteDocument={handleDeleteDocument}
+                  onRefresh={loadHealthAndDocs}
+                  isLoading={isLoadingDocs}
+                />
+              </div>
 
-          {/* Deep Document Inspector (8 cols) */}
-          <div className="lg:col-span-8">
-            <DocumentInspector
-              document={selectedDoc}
-              isLoading={isLoadingSelected}
-            />
-          </div>
-        </div>
+              {/* Deep Document Inspector (8 cols) */}
+              <div className="lg:col-span-8">
+                <DocumentInspector
+                  document={selectedDoc}
+                  isLoading={isLoadingSelected}
+                />
+              </div>
+            </div>
+          </>
+        )}
       </main>
 
       {/* Footer */}

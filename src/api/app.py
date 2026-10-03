@@ -1,9 +1,12 @@
 """FastAPI Application Entry Point."""
 
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.context_routes import router as context_router
+from src.api.generation_routes import router as generation_router
 from src.api.query_routes import router as query_router
 from src.api.rerank_routes import router as rerank_router
 from src.api.retrieval_routes import router as retrieval_router
@@ -19,10 +22,20 @@ def create_app() -> FastAPI:
         version="0.1.0",
     )
 
-    # Enable CORS for Next.js frontend communication
+    # Configure CORS origins safely
+    origins_env = os.getenv("ALLOWED_ORIGINS", "")
+    allowed_origins = [
+        origin.strip()
+        for origin in origins_env.split(",")
+        if origin.strip()
+    ] or [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "*"],
+        allow_origins=allowed_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -34,6 +47,7 @@ def create_app() -> FastAPI:
     app.include_router(retrieval_router)
     app.include_router(rerank_router)
     app.include_router(context_router)
+    app.include_router(generation_router)
 
     @app.get("/api/health", tags=["Health"])
     def health_check():
