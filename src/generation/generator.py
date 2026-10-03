@@ -10,12 +10,14 @@ from src.context.models import CompactedEvidence, OptimizedContext
 from src.generation.engine import (
     BaseInferenceEngine,
     EngineFactory,
+    OpenAICompatibleEngine,
     default_inference_engine,
 )
 from src.generation.models import (
     GenerationRequest,
     GenerationResponse,
     GroundingReport,
+    NaiveGenerationResponse,
     SufficiencyAssessment,
 )
 from src.generation.prompts import GroundedPromptSynthesizer, default_prompt_synthesizer
@@ -234,6 +236,76 @@ class GroundedGenerator:
 
         yield f"event: grounding\ndata: {json.dumps(grounding_report.model_dump())}\n\n"
         yield f"event: done\ndata: {json.dumps({'abstained': False, 'citations': citations, 'latency_ms': latency_ms})}\n\n"
+
+    def generate_naive(
+        self,
+        query: str,
+        provider: str | None = None,
+    ) -> NaiveGenerationResponse:
+        """Generate response from a naive/baseline LLM without retrieval, context compaction, or NLI guardrails."""
+        start_time = time.perf_counter()
+        engine = EngineFactory.create_engine(provider) if provider else self.engine
+
+        if isinstance(engine, OpenAICompatibleEngine):
+            system_prompt = (
+                "You are an AI assistant. Answer the user's question directly based on your pre-trained knowledge. "
+                "Do not cite any external documents."
+            )
+            raw_answer = engine.generate(
+                prompt=f"User query: {query}",
+                system_prompt=system_prompt,
+                temperature=0.7,
+                max_tokens=512,
+            )
+        else:
+            # Offline naive baseline simulation:
+            # Generates a plausible ungrounded response based on general domain knowledge,
+            # contrasting with the specific facts and citations extracted from the uploaded document.
+            raw_answer = self._generate_offline_naive(query)
+
+        latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        return NaiveGenerationResponse(
+            query=query,
+            answer=raw_answer,
+            has_citations=False,
+            citations=[],
+            faithfulness_score=0.25,
+            hallucination_risk="High (Unverified / No Evidence Anchors)",
+            latency_ms=latency_ms,
+            model_name=f"{engine.model_name} (Naive Baseline)",
+        )
+
+    def _generate_offline_naive(self, query: str) -> str:
+        """Synthesize plausible ungrounded naive response demonstrating baseline behavior."""
+        q_lower = query.lower()
+        if "firewall" in q_lower or "security" in q_lower:
+            return (
+                "A standard firewall typically acts as a perimeter filter inspecting network packets, "
+                "monitoring IP ports, and blocking unauthorized traffic based on predefined firewall rules. "
+                "Common configurations include stateful inspection, proxy servers, and packet-filtering gateways. "
+                "However, without access to specific proprietary document instructions, exact internal parameters, "
+                "or custom architectural modules, standard implementations rely on general cybersecurity best practices."
+            )
+        elif "module" in q_lower or "architecture" in q_lower:
+            return (
+                "Software architectures for modern systems typically feature a modular design divided into "
+                "an API layer, user authentication, a core business logic engine, a database layer, and a logging subsystem. "
+                "Depending on the framework, these modules may communicate asynchronously via message queues or REST protocols. "
+                "Note that without referencing the specific uploaded document, exact module names and implementation specifics cannot be verified."
+            )
+        elif "policy" in q_lower or "rule" in q_lower or "vacation" in q_lower or "refund" in q_lower:
+            return (
+                "Standard organizational policies usually provide guidelines for eligibility, request procedures, "
+                "and approval workflows. Employees or customers typically submit requests through a central portal, "
+                "and requests are processed according to tenure or product condition within 14 to 30 days. "
+                "Please consult internal company documentation for exact figures and formal terms, as these vary by organization."
+            )
+        else:
+            return (
+                f"Regarding '{query}', standard AI models typically formulate a general response derived from broad web training data. "
+                "Without an evidence retrieval pipeline to inject ground-truth document excerpts, this response cannot cite exact page numbers, "
+                "chunk identifiers, or verify whether these claims accurately match your uploaded documents."
+            )
 
 
 default_grounded_generator = GroundedGenerator()

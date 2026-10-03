@@ -118,6 +118,56 @@ export interface GroundedAnswerResponse {
   model_name: string;
 }
 
+export interface NaiveGenerationResponse {
+  query: string;
+  answer: string;
+  has_citations: boolean;
+  citations: string[];
+  faithfulness_score?: number;
+  hallucination_risk: string;
+  latency_ms: number;
+  model_name: string;
+}
+
+export interface ComparisonResponse {
+  query: string;
+  naive: NaiveGenerationResponse;
+  grounded: GroundedAnswerResponse;
+  metrics_comparison: Record<string, any>;
+}
+
+export async function submitQuestionComparison(
+  query: string,
+  sessionId?: string,
+  documentId?: string
+): Promise<ComparisonResponse> {
+  const payload: {
+    query: string;
+    session_id?: string;
+    filters?: Record<string, string>;
+  } = { query };
+
+  if (sessionId) {
+    payload.session_id = sessionId;
+  }
+  if (documentId && documentId !== "all") {
+    payload.filters = { document_id: documentId };
+  }
+
+  const res = await fetch(`${API_BASE_URL}/api/generate/compare`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(
+      errorData.detail || "Failed to execute side-by-side comparison"
+    );
+  }
+  return res.json();
+}
+
 export async function submitQuestion(
   query: string,
   sessionId?: string,

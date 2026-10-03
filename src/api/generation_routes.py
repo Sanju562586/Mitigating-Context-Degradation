@@ -10,7 +10,11 @@ from pydantic import BaseModel, Field
 
 from src.context.compactor import default_context_compactor
 from src.generation.generator import default_grounded_generator
-from src.generation.models import GenerationRequest, GenerationResponse
+from src.generation.models import (
+    ComparisonResponse,
+    GenerationRequest,
+    GenerationResponse,
+)
 from src.query_processing.models import ConversationTurn
 from src.reranking.reranker import default_reranker
 from src.retrieval.hybrid import default_hybrid_retriever
@@ -203,6 +207,55 @@ def run_full_qa_pipeline(payload: FullQAPipelineRequest) -> GenerationResponse:
         )
 
     return response
+
+
+@router.post(
+    "/compare",
+    response_model=ComparisonResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Side-by-Side Comparison: Naive LLM vs Our Grounded Mitigation Pipeline",
+)
+def compare_naive_vs_grounded(payload: FullQAPipelineRequest) -> ComparisonResponse:
+    """Execute both pipelines in parallel on the same query:
+
+    1. Naive baseline LLM (direct ungrounded generation)
+    2. Full Grounded Mitigation Pipeline (Retrieval + Rerank + Compaction + Gate + Citations + NLI Verification)
+    """
+    # 1. Run Grounded Pipeline
+    grounded_res = run_full_qa_pipeline(payload)
+
+    # 2. Run Naive Baseline
+    naive_res = default_grounded_generator.generate_naive(
+        query=payload.query,
+        provider=payload.provider,
+    )
+
+    # 3. Assemble Comparative Metrics
+    metrics_comp = {
+        "naive_citations_count": len(naive_res.citations),
+        "grounded_citations_count": len(grounded_res.citations),
+        "naive_faithfulness": "Unverified (0% anchored)",
+        "grounded_faithfulness": f"{round(grounded_res.grounding_report.faithfulness_score * 100)}% verified",
+        "naive_sufficiency_gate": "Disabled (Blind Generation)",
+        "grounded_sufficiency_gate": (
+            f"{'Sufficient' if grounded_res.sufficiency.is_sufficient else 'Abstained'} "
+            f"({round(grounded_res.sufficiency.sufficiency_score * 100)}%)"
+        ),
+        "naive_nli_claims": "0 claims verified",
+        "grounded_nli_claims": (
+            f"{grounded_res.grounding_report.total_claims} verified "
+            f"({grounded_res.grounding_report.entailed_claims_count} entailed, "
+            f"{grounded_res.grounding_report.neutral_claims_count} neutral, "
+            f"{grounded_res.grounding_report.contradicted_claims_count} contradicted)"
+        ),
+    }
+
+    return ComparisonResponse(
+        query=payload.query,
+        naive=naive_res,
+        grounded=grounded_res,
+        metrics_comparison=metrics_comp,
+    )
 
 
 @router.get(

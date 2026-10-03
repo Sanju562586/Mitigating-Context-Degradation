@@ -207,3 +207,34 @@ class StreamEvent(BaseModel):
 
     event: str = Field(..., description="Event type: 'sufficiency', 'token', 'grounding', 'done', 'error'")
     data: dict[str, Any] = Field(..., description="Structured payload associated with the event.")
+
+
+class NaiveGenerationResponse(BaseModel):
+    """Response produced by a naive/baseline LLM without hybrid retrieval or evidence gating."""
+
+    query: str = Field(..., description="User query evaluated.")
+    answer: str = Field(..., description="Direct naive LLM output without evidence citations.")
+    has_citations: bool = Field(default=False, description="Whether citations are present.")
+    citations: list[str] = Field(default_factory=list, description="List of citations (empty for naive).")
+    faithfulness_score: float | None = Field(
+        default=None,
+        description="Faithfulness score (unverified for naive).",
+    )
+    hallucination_risk: str = Field(
+        default="High (Unverified / No Evidence Anchors)",
+        description="Assessed hallucination risk level.",
+    )
+    latency_ms: float = Field(..., description="Generation latency in milliseconds.")
+    model_name: str = Field(..., description="Model identifier used for naive inference.")
+
+
+class ComparisonResponse(BaseModel):
+    """Side-by-side comparison payload evaluating Naive LLM vs Our Grounded Mitigation Pipeline."""
+
+    query: str = Field(..., description="The query processed by both pipelines.")
+    naive: NaiveGenerationResponse = Field(..., description="Baseline Naive LLM output.")
+    grounded: GenerationResponse = Field(..., description="Our Grounded Mitigation Pipeline output.")
+    metrics_comparison: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Summary comparison metrics (citations, hallucination risk, sufficiency, NLI).",
+    )
