@@ -14,7 +14,7 @@
 
 **An End-to-End Grounded Retrieval-Augmented Generation (RAG) Architecture Featuring Hybrid Search, Extractive Context Compaction, Evidence Sufficiency Gating, Anti-Hallucination Guardrails, and Cross-Session External Vector Memory.**
 
-[Architecture](#-pipeline-architecture) •
+[System Architecture](#-system-architecture) •
 [Key Innovations](#-key-innovations--problem-formulation) •
 [Subsystem Walkthrough](#-core-subsystems) •
 [Quick Start](#-quick-start-guide) •
@@ -40,7 +40,7 @@ This repository implements a **multi-stage evidence retrieval, context optimizat
 
 ---
 
-## 🏛️ Pipeline Architecture
+## 🏛️ System Architecture
 
 ```mermaid
 flowchart TD
