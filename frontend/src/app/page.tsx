@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
+import { CrossSessionMemory } from "@/components/CrossSessionMemory";
 import { GroundedQA } from "@/components/GroundedQA";
 import { Navbar } from "@/components/Navbar";
 import { UploadZone } from "@/components/UploadZone";
@@ -14,10 +15,10 @@ import {
   fetchDocuments,
 } from "@/lib/api";
 import { Document, DocumentMetadata, HealthStatus } from "@/types/ingestion";
-import { FileText, MessageSquareQuote, Sparkles } from "lucide-react";
+import { Brain, FileText, MessageSquareQuote, Sparkles } from "lucide-react";
 
 export default function IngestionPage() {
-  const [activeTab, setActiveTab] = useState<"ingestion" | "qa">("qa");
+  const [activeTab, setActiveTab] = useState<"ingestion" | "qa" | "memory">("qa");
   const [backendHealth, setBackendHealth] = useState<HealthStatus | null>(null);
   const [healthError, setHealthError] = useState(false);
   const [documents, setDocuments] = useState<DocumentMetadata[]>([]);
@@ -147,12 +148,18 @@ export default function IngestionPage() {
               Hallucination Mitigation Pipeline
             </div>
             <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">
-              {activeTab === "qa" ? "Grounded Q&A & Verification" : "Documents & Ingestion"}
+              {activeTab === "qa"
+                ? "Grounded Q&A & Verification"
+                : activeTab === "ingestion"
+                ? "Documents & Ingestion"
+                : "Cross-Session External Memory & Client Sync"}
             </h1>
             <p className="mt-1.5 text-sm text-slate-400 max-w-2xl leading-relaxed">
               {activeTab === "qa"
                 ? "Ask questions with verifiable citations, inspect evidence sufficiency gates, and observe safe abstentions."
-                : "Upload and manage reference documents. View document briefs, key metadata, and chunk breakdowns."}
+                : activeTab === "ingestion"
+                ? "Upload and manage reference documents. View document briefs, key metadata, and chunk breakdowns."
+                : "Inspect episodic vector memory, review persistent hierarchical summaries, and configure read/write permissions."}
             </p>
           </div>
 
@@ -179,11 +186,24 @@ export default function IngestionPage() {
               <FileText className="w-4 h-4" />
               Ingestion & Docs
             </button>
+            <button
+              onClick={() => setActiveTab("memory")}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium transition ${
+                activeTab === "memory"
+                  ? "bg-indigo-600 text-white shadow-sm"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <Brain className="w-4 h-4" />
+              External Memory
+            </button>
           </div>
         </div>
 
         {activeTab === "qa" ? (
           <GroundedQA />
+        ) : activeTab === "memory" ? (
+          <CrossSessionMemory />
         ) : (
           <>
             {/* Upload Zone */}

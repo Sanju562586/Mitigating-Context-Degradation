@@ -63,6 +63,7 @@ class GroundedGenerator:
         temperature: float = 0.0,
         max_tokens: int = 1024,
         provider: Optional[str] = None,
+        memory_context: Optional[str] = None,
     ) -> GenerationResponse:
         """Execute synchronous grounded generation with pre- and post-generation guardrails."""
         start_time = time.perf_counter()
@@ -110,6 +111,7 @@ class GroundedGenerator:
             context=context,
             evidence_items=raw_evidence_chunks,
             conversation_history=conversation_history,
+            memory_context=memory_context,
         )
 
         # Step 3: LLM Inference
@@ -169,6 +171,7 @@ class GroundedGenerator:
         temperature: float = 0.0,
         max_tokens: int = 1024,
         provider: Optional[str] = None,
+        memory_context: Optional[str] = None,
     ) -> Iterator[str]:
         """Stream real-time tokens and guardrail telemetry via Server-Sent Events (SSE)."""
         start_time = time.perf_counter()
@@ -198,6 +201,7 @@ class GroundedGenerator:
             context=context,
             evidence_items=raw_evidence_chunks,
             conversation_history=conversation_history,
+            memory_context=memory_context,
         )
 
         # 3. Token Streaming

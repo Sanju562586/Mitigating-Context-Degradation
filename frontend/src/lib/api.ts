@@ -118,11 +118,16 @@ export interface GroundedAnswerResponse {
   model_name: string;
 }
 
-export async function submitQuestion(query: string): Promise<GroundedAnswerResponse> {
+export async function submitQuestion(query: string, sessionId?: string): Promise<GroundedAnswerResponse> {
+  const payload: { query: string; session_id?: string } = { query };
+  if (sessionId) {
+    payload.session_id = sessionId;
+  }
+
   const res = await fetch(`${API_BASE_URL}/api/generate/pipeline/qa`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({ detail: res.statusText }));
@@ -131,4 +136,145 @@ export async function submitQuestion(query: string): Promise<GroundedAnswerRespo
     );
   }
   return res.json();
+}
+
+// ============================================================================
+// Module 7: Cross-Session External Memory & Client Sync
+// ============================================================================
+
+export interface MemoryPermissions {
+  read_enabled: boolean;
+  write_enabled: boolean;
+  auto_summarize: boolean;
+  max_injected_memories: number;
+  max_injected_tokens: number;
+}
+
+export interface Session {
+  session_id: string;
+  user_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  active_document_ids: string[];
+  turn_count: number;
+  is_active: boolean;
+  summary?: string;
+  metadata: Record<string, any>;
+}
+
+export interface EpisodicMemoryItem {
+  memory_id: string;
+  session_id: string;
+  user_id: string;
+  turn_index: number;
+  query: string;
+  intent?: string;
+  answer: string;
+  verified_facts: string[];
+  referenced_doc_ids: string[];
+  citations: string[];
+  timestamp: string;
+  importance_score: number;
+  tags: string[];
+  metadata: Record<string, any>;
+}
+
+export interface HierarchicalSummary {
+  summary_id: string;
+  session_id: string;
+  level: number;
+  title: string;
+  summary_text: string;
+  key_entities: string[];
+  turn_count: number;
+  created_at: string;
+}
+
+export interface SessionDetailsResponse {
+  session: Session;
+  permissions: MemoryPermissions;
+  turns: EpisodicMemoryItem[];
+  summaries: HierarchicalSummary[];
+}
+
+export interface MemorySearchResult {
+  query: string;
+  memories: EpisodicMemoryItem[];
+  summaries: HierarchicalSummary[];
+  scores: number[];
+  total_found: number;
+}
+
+export async function fetchSessions(): Promise<Session[]> {
+  const res = await fetch(`${API_BASE_URL}/api/memory/sessions`, { cache: "no-store" });
+  if (!res.ok) throw new Error("Failed to fetch sessions");
+  return res.json();
+}
+
+export async function createSession(title: string, activeDocumentIds: string[] = []): Promise<Session> {
+  const res = await fetch(`${API_BASE_URL}/api/memory/sessions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title, active_document_ids: activeDocumentIds }),
+  });
+  if (!res.ok) throw new Error("Failed to create new session");
+  return res.json();
+}
+
+export async function fetchSessionDetails(sessionId: string): Promise<SessionDetailsResponse> {
+  const res = await fetch(`${API_BASE_URL}/api/memory/sessions/${sessionId}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Failed to fetch session ${sessionId}`);
+  return res.json();
+}
+
+export async function updateSessionPermissions(
+  sessionId: string,
+  permissions: MemoryPermissions
+): Promise<MemoryPermissions> {
+  const res = await fetch(`${API_BASE_URL}/api/memory/sessions/${sessionId}/permissions`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(permissions),
+  });
+  if (!res.ok) throw new Error("Failed to update session permissions");
+  return res.json();
+}
+
+export async function clearSessionMemory(sessionId: string): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/api/memory/sessions/${sessionId}/clear`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("Failed to clear session memory");
+}
+
+export async function searchMemory(query: string, sessionId?: string): Promise<MemorySearchResult> {
+  const res = await fetch(`${API_BASE_URL}/api/memory/search`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, session_id: sessionId || null }),
+  });
+  if (!res.ok) throw new Error("Failed to search memory");
+  return res.json();
+}
+
+export async function captureWebContent(payload: {
+  url: string;
+  title: string;
+  selected_text: string;
+  session_id?: string;
+}): Promise<EpisodicMemoryItem> {
+  const res = await fetch(`${API_BASE_URL}/api/memory/capture-web`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error("Failed to capture web context");
+  return res.json();
+}
+
+export async function exportSessionMemoryMarkdown(sessionId: string): Promise<string> {
+  const res = await fetch(`${API_BASE_URL}/api/memory/sessions/${sessionId}/export?format=markdown`);
+  if (!res.ok) throw new Error("Failed to export memory");
+  return res.text();
 }
