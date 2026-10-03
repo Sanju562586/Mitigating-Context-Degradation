@@ -85,6 +85,10 @@ class FullQAPipelineRequest(BaseModel):
         default=None,
         description="Optional LLM provider override ('offline', 'openai', 'gemini', 'ollama').",
     )
+    session_id: Optional[str] = Field(
+        default=None,
+        description="Optional session ID to enable cross-session external memory sync (Module 7).",
+    )
 
 
 @router.post(
@@ -126,17 +130,31 @@ def stream_grounded_answer(payload: GenerationRequest) -> StreamingResponse:
     "/pipeline/qa",
     response_model=GenerationResponse,
     status_code=status.HTTP_200_OK,
-    summary="End-to-End Pipeline: Retrieval (M3) -> Reranking (M4) -> Compaction (M5) -> Generation (M6)",
+    summary="End-to-End Pipeline: Retrieval (M3) -> Reranking (M4) -> Compaction (M5) -> Generation (M6) + Optional Memory (M7)",
 )
 def run_full_qa_pipeline(payload: FullQAPipelineRequest) -> GenerationResponse:
     """Execute end-to-end question answering pipeline:
 
-    1. Hybrid Retrieval (Dense FAISS + Sparse BM25 + RRF)
-    2. Cross-Encoder Reranking & Pruning
-    3. Extractive Context Compaction & Lost-in-the-Middle Reordering
-    4. Evidence Sufficiency Assessment & Truthful Abstention Protocol
-    5. Grounded LLM Generation & Sentence-Level NLI Verification
+    1. Pre-Inference Memory Sync (if session_id provided)
+    2. Hybrid Retrieval (Dense FAISS + Sparse BM25 + RRF)
+    3. Cross-Encoder Reranking & Pruning
+    4. Extractive Context Compaction & Lost-in-the-Middle Reordering
+    5. Evidence Sufficiency Assessment & Truthful Abstention Protocol
+    6. Grounded LLM Generation & Sentence-Level NLI Verification
+    7. Post-Inference Memory Sync (verified facts & persistent summaries)
     """
+    # 0. Optional Module 7: Pre-Inference Memory Sync
+    memory_context_str: Optional[str] = None
+    if payload.session_id:
+        from src.memory.synchronizer import default_memory_synchronizer
+
+        sync_ctx = default_memory_synchronizer.pre_inference_sync(
+            query=payload.query,
+            session_id=payload.session_id,
+        )
+        if sync_ctx.read_enabled and sync_ctx.formatted_memory_context:
+            memory_context_str = sync_ctx.formatted_memory_context
+
     # 1. Module 3: Hybrid Retrieval
     retrieval_res = default_hybrid_retriever.retrieve(
         query=payload.query,
@@ -160,7 +178,7 @@ def run_full_qa_pipeline(payload: FullQAPipelineRequest) -> GenerationResponse:
     )
 
     # 4 & 5. Module 6: Grounded Generation & Guardrails
-    return default_grounded_generator.generate(
+    response = default_grounded_generator.generate(
         query=payload.query,
         context=compacted_context,
         conversation_history=payload.conversation_history,
@@ -169,7 +187,22 @@ def run_full_qa_pipeline(payload: FullQAPipelineRequest) -> GenerationResponse:
         temperature=payload.temperature,
         max_tokens=payload.max_tokens,
         provider=payload.provider,
+        memory_context=memory_context_str,
     )
+
+    # 6. Optional Module 7: Post-Inference Memory Sync
+    if payload.session_id:
+        from src.memory.synchronizer import default_memory_synchronizer
+
+        default_memory_synchronizer.post_inference_sync(
+            session_id=payload.session_id,
+            query=payload.query,
+            answer=response.answer,
+            grounding_report=response.grounding_report,
+            referenced_doc_ids=[c.document_id for c in ranked_context.chunks],
+        )
+
+    return response
 
 
 @router.get(
