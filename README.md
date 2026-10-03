@@ -42,6 +42,13 @@ This repository implements a **multi-stage evidence retrieval, context optimizat
 
 ## 🏛️ System Architecture
 
+<p align="center">
+  <img src="docs/assets/system_architecture.svg" alt="System Architecture Diagram" width="100%" />
+</p>
+
+<details>
+<summary><b>🔍 View Pipeline Component Dataflow Details</b></summary>
+
 ```mermaid
 flowchart TD
     subgraph Ingestion ["1. Multimodal Document Ingestion & Chunking"]
@@ -100,6 +107,7 @@ flowchart TD
         MEM_STORE --> SUMMARIZE[Hierarchical Persistent Summarizer]
     end
 ```
+</details>
 
 ---
 

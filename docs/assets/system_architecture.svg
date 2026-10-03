@@ -1,0 +1,423 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 920" width="100%" height="100%">
+  <defs>
+    <!-- Background Grid & Gradients -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#080c16"/>
+      <stop offset="50%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#090d18"/>
+    </linearGradient>
+
+    <!-- Card Backgrounds -->
+    <linearGradient id="cardGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b" stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#0f172a" stop-opacity="0.95"/>
+    </linearGradient>
+
+    <linearGradient id="accentCyan" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#06b6d4"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+
+    <linearGradient id="accentPurple" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#ec4899"/>
+    </linearGradient>
+
+    <linearGradient id="accentEmerald" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+
+    <linearGradient id="accentAmber" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#ef4444"/>
+    </linearGradient>
+
+    <linearGradient id="accentRose" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#f43f5e"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient>
+
+    <!-- Arrow Markers -->
+    <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#64748b"/>
+    </marker>
+    <marker id="arrowCyan" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#38bdf8"/>
+    </marker>
+    <marker id="arrowEmerald" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#34d399"/>
+    </marker>
+    <marker id="arrowAmber" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#fbbf24"/>
+    </marker>
+    <marker id="arrowRose" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#fb7185"/>
+    </marker>
+
+    <!-- Filters for Glow & Shadows -->
+    <filter id="dropShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="6" flood-color="#000000" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+
+  <style>
+    .title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 20px; font-weight: 700; fill: #ffffff; }
+    .subtitle { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 11px; font-weight: 500; fill: #94a3b8; }
+    .box-title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+    .item-title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 11px; font-weight: 600; fill: #e2e8f0; }
+    .item-desc { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 9.5px; font-weight: 400; fill: #94a3b8; }
+    .badge { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 9px; font-weight: 600; }
+    .connector { stroke: #475569; stroke-width: 1.8; fill: none; }
+    .connector-dashed { stroke: #64748b; stroke-width: 1.5; stroke-dasharray: 4,4; fill: none; }
+  </style>
+
+  <!-- Deep Background Canvas -->
+  <rect width="1200" height="920" fill="url(#bgGrad)"/>
+  
+  <!-- Subtle decorative grid -->
+  <g opacity="0.05" stroke="#94a3b8" stroke-width="1">
+    <line x1="0" y1="150" x2="1200" y2="150"/>
+    <line x1="0" y1="310" x2="1200" y2="310"/>
+    <line x1="0" y1="520" x2="1200" y2="520"/>
+    <line x1="400" y1="0" x2="400" y2="920"/>
+    <line x1="800" y1="0" x2="800" y2="920"/>
+  </g>
+
+  <!-- Canvas Header -->
+  <g transform="translate(40, 32)">
+    <text class="title" x="0" y="0">System Architecture</text>
+    <text class="subtitle" x="0" y="18">End-to-End Grounded Retrieval-Augmented Generation, Evidence Sufficiency Gating &amp; External Memory</text>
+  </g>
+
+  <!-- ========================================================================= -->
+  <!-- ROW 1: INGESTION (Left), DUAL INDEXING (Center), EXTERNAL MEMORY (Right) -->
+  <!-- ========================================================================= -->
+
+  <!-- MODULE 1: INGESTION -->
+  <g transform="translate(40, 75)" filter="url(#dropShadow)">
+    <rect width="350" height="195" rx="14" fill="url(#cardGrad)" stroke="#334155" stroke-width="1.2"/>
+    <rect width="350" height="4" rx="2" fill="url(#accentCyan)"/>
+    <text class="box-title" fill="#38bdf8" x="18" y="24">01 • Ingestion &amp; Chunking</text>
+    <rect x="260" y="12" width="72" height="16" rx="8" fill="#0369a1" fill-opacity="0.3"/>
+    <text class="badge" fill="#38bdf8" x="296" y="23" text-anchor="middle">MODULE 1</text>
+
+    <!-- Sub-item 1: Structural Parsing -->
+    <g transform="translate(18, 38)">
+      <rect width="314" height="40" rx="8" fill="#1e293b" fill-opacity="0.6" stroke="#334155" stroke-width="0.8"/>
+      <text class="item-title" x="12" y="17">Multi-Format Document Parsing</text>
+      <text class="item-desc" x="12" y="30">PDF (PyMuPDF) • DOCX • Markdown • HTML • Plain Text</text>
+    </g>
+
+    <!-- Sub-item 2: Cleaning & Normalization -->
+    <g transform="translate(18, 86)">
+      <rect width="314" height="40" rx="8" fill="#1e293b" fill-opacity="0.6" stroke="#334155" stroke-width="0.8"/>
+      <text class="item-title" x="12" y="17">Sanitization &amp; Canonicalization</text>
+      <text class="item-desc" x="12" y="30">Boilerplate stripping, whitespace &amp; unicode normalization</text>
+    </g>
+
+    <!-- Sub-item 3: Semantic Chunking -->
+    <g transform="translate(18, 134)">
+      <rect width="314" height="42" rx="8" fill="#1e293b" fill-opacity="0.6" stroke="#334155" stroke-width="0.8"/>
+      <text class="item-title" x="12" y="17">Sliding-Window Semantic Chunking</text>
+      <text class="item-desc" x="12" y="31">Token offsets, overlap preservation &amp; document ID tagging</text>
+    </g>
+  </g>
+
+  <!-- MODULE 2: DUAL HYBRID INDEXING -->
+  <g transform="translate(425, 75)" filter="url(#dropShadow)">
+    <rect width="350" height="195" rx="14" fill="url(#cardGrad)" stroke="#334155" stroke-width="1.2"/>
+    <rect width="350" height="4" rx="2" fill="url(#accentPurple)"/>
+    <text class="box-title" fill="#a78bfa" x="18" y="24">02 • Dual Hybrid Indexing</text>
+    <rect x="260" y="12" width="72" height="16" rx="8" fill="#6d28d9" fill-opacity="0.3"/>
+    <text class="badge" fill="#a78bfa" x="296" y="23" text-anchor="middle">MODULE 2</text>
+
+    <!-- Sub-item 1: Embeddings -->
+    <g transform="translate(18, 38)">
+      <rect width="314" height="40" rx="8" fill="#1e293b" fill-opacity="0.6" stroke="#334155" stroke-width="0.8"/>
+      <text class="item-title" x="12" y="17">Sentence-Transformers Dense Embeddings</text>
+      <text class="item-desc" x="12" y="30">all-MiniLM-L6-v2 (384-dim) with strict L2-normalization</text>
+    </g>
+
+    <!-- Sub-item 2: FAISS Index -->
+    <g transform="translate(18, 86)">
+      <rect width="314" height="40" rx="8" fill="#1e293b" fill-opacity="0.6" stroke="#334155" stroke-width="0.8"/>
+      <text class="item-title" x="12" y="17">FAISS Dense Vector Index (IndexFlatIP)</text>
+      <text class="item-desc" x="12" y="30">Exact cosine similarity inner-product search &amp; persistence</text>
+    </g>
+
+    <!-- Sub-item 3: BM25 Sparse Index -->
+    <g transform="translate(18, 134)">
+      <rect width="314" height="42" rx="8" fill="#1e293b" fill-opacity="0.6" stroke="#334155" stroke-width="0.8"/>
+      <text class="item-title" x="12" y="17">BM25 Sparse Inverted Keyword Index</text>
+      <text class="item-desc" x="12" y="31">Exact keyword, acronym &amp; numerical frequency ranking</text>
+    </g>
+  </g>
+
+  <!-- MODULE 7: CROSS-SESSION EXTERNAL MEMORY -->
+  <g transform="translate(810, 75)" filter="url(#dropShadow)">
+    <rect width="350" height="195" rx="14" fill="url(#cardGrad)" stroke="#475569" stroke-width="1.2"/>
+    <rect width="350" height="4" rx="2" fill="url(#accentRose)"/>
+    <text class="box-title" fill="#fb7185" x="18" y="24">07 • External Memory &amp; Sync</text>
+    <rect x="260" y="12" width="72" height="16" rx="8" fill="#be123c" fill-opacity="0.3"/>
+    <text class="badge" fill="#fb7185" x="296" y="23" text-anchor="middle">MODULE 7</text>
+
+    <!-- Sub-item 1: Browser Extension -->
+    <g transform="translate(18, 38)">
+      <rect width="314" height="40" rx="8" fill="#1e293b" fill-opacity="0.6" stroke="#334155" stroke-width="0.8"/>
+      <text class="item-title" x="12" y="17">Chromium Manifest V3 Browser Extension</text>
+      <text class="item-desc" x="12" y="30">One-click context capture, right-click sync &amp; session routing</text>
+    </g>
+
+    <!-- Sub-item 2: Session Registry & SQLite -->
+    <g transform="translate(18, 86)">
+      <rect width="314" height="40" rx="8" fill="#1e293b" fill-opacity="0.6" stroke="#334155" stroke-width="0.8"/>
+      <text class="item-title" x="12" y="17">ACID SQLite Store &amp; Governance</text>
+      <text class="item-desc" x="12" y="30">Session lifecycle, user profiles &amp; Read/Write permissions</text>
+    </g>
+
+    <!-- Sub-item 3: Episodic Vector Store & Summarizer -->
+    <g transform="translate(18, 134)">
+      <rect width="314" height="42" rx="8" fill="#1e293b" fill-opacity="0.6" stroke="#334155" stroke-width="0.8"/>
+      <text class="item-title" x="12" y="17">Episodic FAISS Index &amp; Summarizer</text>
+      <text class="item-desc" x="12" y="31">Hierarchical condensation of long sessions into summaries</text>
+    </g>
+  </g>
+
+  <!-- ========================================================================= -->
+  <!-- ROW 2: USER QUERY (Left), HYBRID RETRIEVAL (Center), RERANK & COMPACTION (Right) -->
+  <!-- ========================================================================= -->
+
+  <!-- MODULE 3A: USER QUERY & PROCESSING -->
+  <g transform="translate(40, 310)" filter="url(#dropShadow)">
+    <rect width="350" height="175" rx="14" fill="url(#cardGrad)" stroke="#334155" stroke-width="1.2"/>
+    <rect width="350" height="4" rx="2" fill="url(#accentCyan)"/>
+    <text class="box-title" fill="#38bdf8" x="18" y="24">User Query &amp; Intent Detection</text>
+    <rect x="270" y="12" width="62" height="16" rx="8" fill="#0369a1" fill-opacity="0.3"/>
+    <text class="badge" fill="#38bdf8" x="301" y="23" text-anchor="middle">INPUT</text>
+
+    <g transform="translate(18, 38)">
+      <rect width="314" height="38" rx="8" fill="#1e293b" fill-opacity="0.6" stroke="#334155" stroke-width="0.8"/>
+      <text class="item-title" x="12" y="16">Query Intent Classification</text>
+      <text class="item-desc" x="12" y="29">Factual, Exploratory, Comparative &amp; Instructional intent</text>
+    </g>
+
+    <g transform="translate(18, 82)">
+      <rect width="314" height="38" rx="8" fill="#1e293b" fill-opacity="0.6" stroke="#334155" stroke-width="0.8"/>
+      <text class="item-title" x="12" y="16">Query Expansion &amp; Rewriting</text>
+      <text class="item-desc" x="12" y="29">Semantic variant generation &amp; sub-query decomposition</text>
+    </g>
+
+    <g transform="translate(18, 126)">
+      <rect width="314" height="36" rx="8" fill="#1e293b" fill-opacity="0.6" stroke="#334155" stroke-width="0.8"/>
+      <text class="item-title" x="12" y="15">Structured Metadata Extraction</text>
+      <text class="item-desc" x="12" y="27">Automatic filter parsing (dates, authors, document IDs)</text>
+    </g>
+  </g>
+
+  <!-- MODULE 3B: HYBRID RETRIEVAL & RRF -->
+  <g transform="translate(425, 310)" filter="url(#dropShadow)">
+    <rect width="350" height="175" rx="14" fill="url(#cardGrad)" stroke="#334155" stroke-width="1.2"/>
+    <rect width="350" height="4" rx="2" fill="url(#accentPurple)"/>
+    <text class="box-title" fill="#a78bfa" x="18" y="24">03 • Hybrid Retrieval &amp; RRF</text>
+    <rect x="260" y="12" width="72" height="16" rx="8" fill="#6d28d9" fill-opacity="0.3"/>
+    <text class="badge" fill="#a78bfa" x="296" y="23" text-anchor="middle">MODULE 3</text>
+
+    <g transform="translate(18, 38)">
+      <rect width="314" height="38" rx="8" fill="#1e293b" fill-opacity="0.6" stroke="#334155" stroke-width="0.8"/>
+      <text class="item-title" x="12" y="16">Parallel Multi-Modal Search</text>
+      <text class="item-desc" x="12" y="29">Concurrent dense vector querying &amp; BM25 inverted lookup</text>
+    </g>
+
+    <g transform="translate(18, 82)">
+      <rect width="314" height="38" rx="8" fill="#1e293b" fill-opacity="0.6" stroke="#334155" stroke-width="0.8"/>
+      <text class="item-title" x="12" y="16">Reciprocal Rank Fusion (RRF)</text>
+      <text class="item-desc" x="12" y="29">Scale-invariant rank merger: RRF(d) = ∑ 1 / (60 + rank(d))</text>
+    </g>
+
+    <g transform="translate(18, 126)">
+      <rect width="314" height="36" rx="8" fill="#1e293b" fill-opacity="0.6" stroke="#334155" stroke-width="0.8"/>
+      <text class="item-title" x="12" y="15">Candidate Pool Assembly</text>
+      <text class="item-desc" x="12" y="27">Top-k fused candidates with normalized relevance priors</text>
+    </g>
+  </g>
+
+  <!-- MODULE 4 & 5: RERANKING & CONTEXT COMPACTION -->
+  <g transform="translate(810, 310)" filter="url(#dropShadow)">
+    <rect width="350" height="175" rx="14" fill="url(#cardGrad)" stroke="#334155" stroke-width="1.2"/>
+    <rect width="350" height="4" rx="2" fill="url(#accentEmerald)"/>
+    <text class="box-title" fill="#34d399" x="18" y="24">04 &amp; 05 • Reranking &amp; Compaction</text>
+    <rect x="250" y="12" width="82" height="16" rx="8" fill="#047857" fill-opacity="0.3"/>
+    <text class="badge" fill="#34d399" x="291" y="23" text-anchor="middle">MODULE 4-5</text>
+
+    <g transform="translate(18, 38)">
+      <rect width="314" height="38" rx="8" fill="#1e293b" fill-opacity="0.6" stroke="#334155" stroke-width="0.8"/>
+      <text class="item-title" x="12" y="16">Cross-Encoder Cross-Attention Reranking</text>
+      <text class="item-desc" x="12" y="29">Joint token scoring with dynamic threshold score pruning</text>
+    </g>
+
+    <g transform="translate(18, 82)">
+      <rect width="314" height="38" rx="8" fill="#1e293b" fill-opacity="0.6" stroke="#334155" stroke-width="0.8"/>
+      <text class="item-title" x="12" y="16">Sentence Pruning &amp; Deduplication</text>
+      <text class="item-desc" x="12" y="29">Salience-based extraction &amp; cosine dedup (τ ≥ 0.85)</text>
+    </g>
+
+    <g transform="translate(18, 126)">
+      <rect width="314" height="36" rx="8" fill="#1e293b" fill-opacity="0.6" stroke="#334155" stroke-width="0.8"/>
+      <text class="item-title" x="12" y="15">Lost-in-the-Middle Reordering</text>
+      <text class="item-desc" x="12" y="27">Places highest salience at prompt boundaries (head &amp; tail)</text>
+    </g>
+  </g>
+
+  <!-- ========================================================================= -->
+  <!-- ROW 3: SUFFICIENCY GATE (Left), GROUNDED GENERATOR (Center), GUARDRAILS (Right) -->
+  <!-- ========================================================================= -->
+
+  <!-- MODULE 6A: EVIDENCE SUFFICIENCY GATE -->
+  <g transform="translate(40, 520)" filter="url(#dropShadow)">
+    <rect width="350" height="240" rx="14" fill="url(#cardGrad)" stroke="#334155" stroke-width="1.2"/>
+    <rect width="350" height="4" rx="2" fill="url(#accentAmber)"/>
+    <text class="box-title" fill="#fbbf24" x="18" y="24">06A • Evidence Sufficiency Gate</text>
+    <rect x="250" y="12" width="82" height="16" rx="8" fill="#b45309" fill-opacity="0.3"/>
+    <text class="badge" fill="#fbbf24" x="291" y="23" text-anchor="middle">GATEWAY</text>
+
+    <g transform="translate(18, 38)">
+      <rect width="314" height="42" rx="8" fill="#1e293b" fill-opacity="0.6" stroke="#334155" stroke-width="0.8"/>
+      <text class="item-title" x="12" y="17">Semantic Coverage &amp; Gap Analysis</text>
+      <text class="item-desc" x="12" y="31">Quantifies matched vs. missing information requirements</text>
+    </g>
+
+    <g transform="translate(18, 88)">
+      <rect width="314" height="64" rx="8" fill="#1e293b" fill-opacity="0.6" stroke="#ef4444" stroke-opacity="0.3" stroke-width="0.8"/>
+      <text class="item-title" fill="#f87171" x="12" y="18">Path 1: Truthful Abstention Protocol</text>
+      <text class="item-desc" x="12" y="32">Triggered when Sufficiency Score &lt; Threshold θ</text>
+      <text class="item-desc" fill="#fca5a5" x="12" y="46">Politely abstains with diagnostic reasoning; zero hallucination</text>
+    </g>
+
+    <g transform="translate(18, 160)">
+      <rect width="314" height="66" rx="8" fill="#1e293b" fill-opacity="0.6" stroke="#10b981" stroke-opacity="0.3" stroke-width="0.8"/>
+      <text class="item-title" fill="#34d399" x="12" y="18">Path 2: Grounded Prompt Synthesis</text>
+      <text class="item-desc" x="12" y="32">Triggered when Evidence is Sufficient / Partial</text>
+      <text class="item-desc" fill="#6ee7b7" x="12" y="46">Synthesizes prompt with mandatory bracketed citations</text>
+    </g>
+  </g>
+
+  <!-- MODULE 6B: GROUNDED INFERENCE -->
+  <g transform="translate(425, 520)" filter="url(#dropShadow)">
+    <rect width="350" height="240" rx="14" fill="url(#cardGrad)" stroke="#334155" stroke-width="1.2"/>
+    <rect width="350" height="4" rx="2" fill="url(#accentEmerald)"/>
+    <text class="box-title" fill="#34d399" x="18" y="24">06B • Grounded Generation</text>
+    <rect x="250" y="12" width="82" height="16" rx="8" fill="#047857" fill-opacity="0.3"/>
+    <text class="badge" fill="#34d399" x="291" y="23" text-anchor="middle">MODULE 6</text>
+
+    <g transform="translate(18, 38)">
+      <rect width="314" height="42" rx="8" fill="#1e293b" fill-opacity="0.6" stroke="#334155" stroke-width="0.8"/>
+      <text class="item-title" x="12" y="17">Provider-Agnostic Inference Engine</text>
+      <text class="item-desc" x="12" y="31">Offline synthesizer, local Ollama/vLLM, or hosted API models</text>
+    </g>
+
+    <g transform="translate(18, 88)">
+      <rect width="314" height="42" rx="8" fill="#1e293b" fill-opacity="0.6" stroke="#334155" stroke-width="0.8"/>
+      <text class="item-title" x="12" y="17">Real-Time Server-Sent Events (SSE)</text>
+      <text class="item-desc" x="12" y="31">Token-by-token streaming with live telemetry payloads</text>
+    </g>
+
+    <g transform="translate(18, 138)">
+      <rect width="314" height="42" rx="8" fill="#1e293b" fill-opacity="0.6" stroke="#334155" stroke-width="0.8"/>
+      <text class="item-title" x="12" y="17">Mandatory Citation Enforcement</text>
+      <text class="item-desc" x="12" y="31">Every factual proposition tagged with [Doc X, Chunk Y]</text>
+    </g>
+
+    <g transform="translate(18, 188)">
+      <rect width="314" height="38" rx="8" fill="#1e293b" fill-opacity="0.6" stroke="#334155" stroke-width="0.8"/>
+      <text class="item-title" x="12" y="16">Pre-Inference Memory Injection</text>
+      <text class="item-desc" x="12" y="29">Injects compact past verified facts within hard token budget</text>
+    </g>
+  </g>
+
+  <!-- MODULE 6C: ANTI-HALLUCINATION NLI GUARDRAILS -->
+  <g transform="translate(810, 520)" filter="url(#dropShadow)">
+    <rect width="350" height="240" rx="14" fill="url(#cardGrad)" stroke="#334155" stroke-width="1.2"/>
+    <rect width="350" height="4" rx="2" fill="url(#accentAmber)"/>
+    <text class="box-title" fill="#fbbf24" x="18" y="24">06C • NLI Claim Verification</text>
+    <rect x="240" y="12" width="92" height="16" rx="8" fill="#b45309" fill-opacity="0.3"/>
+    <text class="badge" fill="#fbbf24" x="286" y="23" text-anchor="middle">GUARDRAILS</text>
+
+    <g transform="translate(18, 38)">
+      <rect width="314" height="42" rx="8" fill="#1e293b" fill-opacity="0.6" stroke="#334155" stroke-width="0.8"/>
+      <text class="item-title" x="12" y="17">Atomic Claim Decomposition</text>
+      <text class="item-desc" x="12" y="31">Extracts discrete verifiable factual assertions from answer</text>
+    </g>
+
+    <g transform="translate(18, 88)">
+      <rect width="314" height="74" rx="8" fill="#1e293b" fill-opacity="0.6" stroke="#334155" stroke-width="0.8"/>
+      <text class="item-title" x="12" y="16">Sentence-Level NLI Verification</text>
+      <text class="item-desc" fill="#34d399" x="12" y="30">• ENTAILED: Directly substantiated by evidence chunks</text>
+      <text class="item-desc" fill="#fcd34d" x="12" y="44">• NEUTRAL: Unsupported claim lacking direct evidence</text>
+      <text class="item-desc" fill="#f87171" x="12" y="58">• CONTRADICTED: Refuted claim triggering hallucination flag</text>
+    </g>
+
+    <g transform="translate(18, 170)">
+      <rect width="314" height="56" rx="8" fill="#1e293b" fill-opacity="0.6" stroke="#334155" stroke-width="0.8"/>
+      <text class="item-title" x="12" y="16">Citation Provenance &amp; Verification</text>
+      <text class="item-desc" x="12" y="30">Verified citations match valid chunk excerpts</text>
+      <text class="item-desc" x="12" y="44">Entailed facts written back to Module 7 External Memory</text>
+    </g>
+  </g>
+
+  <!-- ========================================================================= -->
+  <!-- CONNECTING ARROWS & DATAFLOWS -->
+  <!-- ========================================================================= -->
+
+  <!-- Flow 1: Ingestion -> Dual Indexing -->
+  <path d="M 390 172 L 425 172" class="connector" marker-end="url(#arrow)"/>
+
+  <!-- Flow 2: Dual Indexing (Dense & Sparse) -> Hybrid Retrieval -->
+  <path d="M 600 270 L 600 310" class="connector" marker-end="url(#arrowCyan)"/>
+
+  <!-- Flow 3: User Query -> Hybrid Retrieval -->
+  <path d="M 390 397 L 425 397" class="connector" marker-end="url(#arrowCyan)"/>
+
+  <!-- Flow 4: Hybrid Retrieval -> Reranking & Compaction -->
+  <path d="M 775 397 L 810 397" class="connector" marker-end="url(#arrow)"/>
+
+  <!-- Flow 5: Context Compaction -> Sufficiency Gate (Loop Down and Left) -->
+  <path d="M 985 485 L 985 502 L 215 502 L 215 520" class="connector" marker-end="url(#arrowAmber)"/>
+
+  <!-- Flow 6: Sufficiency Gate -> Grounded Generation -->
+  <path d="M 390 640 L 425 640" class="connector" marker-end="url(#arrowEmerald)"/>
+
+  <!-- Flow 7: Grounded Generation -> NLI Verifier -->
+  <path d="M 775 640 L 810 640" class="connector" marker-end="url(#arrow)"/>
+
+  <!-- Flow 8: Entailed Verified Facts -> External Memory (Loop up to Module 7) -->
+  <path d="M 1120 520 L 1120 270" class="connector-dashed" marker-end="url(#arrowRose)"/>
+  <text x="1130" y="395" class="badge" fill="#fb7185" transform="rotate(90, 1130, 395)">Verified Facts Sync</text>
+
+  <!-- Flow 9: External Memory -> Pre-Inference Injection (Dashed loop to Prompt) -->
+  <path d="M 810 172 L 790 172 L 790 670 L 425 670" class="connector-dashed" marker-end="url(#arrowRose)"/>
+  <text x="778" y="250" class="badge" fill="#fb7185" transform="rotate(90, 778, 250)">Episodic Memory Injection</text>
+
+  <!-- Flow 10: Extension to Memory -->
+  <path d="M 985 75 L 985 60 L 985 75" class="connector"/>
+
+  <!-- Footer Legend -->
+  <g transform="translate(40, 880)">
+    <circle cx="10" cy="10" r="4" fill="#38bdf8"/>
+    <text class="item-desc" x="22" y="13">Ingestion &amp; Query</text>
+
+    <circle cx="150" cy="10" r="4" fill="#a78bfa"/>
+    <text class="item-desc" x="162" y="13">Hybrid Retrieval &amp; RRF</text>
+
+    <circle cx="310" cy="10" r="4" fill="#34d399"/>
+    <text class="item-desc" x="322" y="13">Compaction &amp; Generation</text>
+
+    <circle cx="480" cy="10" r="4" fill="#fbbf24"/>
+    <text class="item-desc" x="492" y="13">Sufficiency &amp; NLI Guardrails</text>
+
+    <circle cx="670" cy="10" r="4" fill="#fb7185"/>
+    <text class="item-desc" x="682" y="13">External Memory &amp; Client Sync</text>
+
+    <text class="item-desc" x="1160" y="13" text-anchor="end">Mitigating Context Degradation in LLMs • Major Project</text>
+  </g>
+</svg>

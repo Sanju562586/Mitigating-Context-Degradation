@@ -160,7 +160,7 @@ export interface Session {
   turn_count: number;
   is_active: boolean;
   summary?: string;
-  metadata: Record<string, any>;
+  metadata: Record<string, unknown>;
 }
 
 export interface EpisodicMemoryItem {
@@ -177,7 +177,7 @@ export interface EpisodicMemoryItem {
   timestamp: string;
   importance_score: number;
   tags: string[];
-  metadata: Record<string, any>;
+  metadata: Record<string, unknown>;
 }
 
 export interface HierarchicalSummary {
