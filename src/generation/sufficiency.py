@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from typing import List, Optional
 
 from src.context.models import CompactedEvidence, OptimizedContext
 from src.generation.models import SufficiencyAssessment
@@ -33,7 +32,7 @@ class EvidenceSufficiencyClassifier:
         self.default_threshold = default_threshold
 
     @staticmethod
-    def extract_informative_terms(text: str) -> List[str]:
+    def extract_informative_terms(text: str) -> list[str]:
         """Extract meaningful factual query terms, entities, and keywords."""
         tokens = re.findall(r"\b[a-zA-Z0-9_\-\.]{2,}\b", text.lower())
         return [t for t in tokens if t not in _STOP_WORDS]
@@ -52,9 +51,9 @@ class EvidenceSufficiencyClassifier:
     def assess_sufficiency(
         self,
         query: str,
-        context: Optional[OptimizedContext] = None,
-        evidence_items: Optional[List[CompactedEvidence]] = None,
-        threshold: Optional[float] = None,
+        context: OptimizedContext | None = None,
+        evidence_items: list[CompactedEvidence] | None = None,
+        threshold: float | None = None,
     ) -> SufficiencyAssessment:
         """Evaluate evidence coverage against query information requirements.
 
@@ -71,7 +70,7 @@ class EvidenceSufficiencyClassifier:
         topic = self.extract_topic(query)
 
         # Collect evidence passages
-        items: List[CompactedEvidence] = []
+        items: list[CompactedEvidence] = []
         if context is not None and context.evidence_items:
             items = context.evidence_items
         elif evidence_items:
@@ -112,8 +111,8 @@ class EvidenceSufficiencyClassifier:
             )
 
         # Analyze token coverage and aspect matching
-        matched_aspects: List[str] = []
-        missing_aspects: List[str] = []
+        matched_aspects: list[str] = []
+        missing_aspects: list[str] = []
 
         for term in query_terms:
             # Check for exact token match or stem match in evidence

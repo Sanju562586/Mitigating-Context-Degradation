@@ -53,8 +53,8 @@ class ElementChunker:
                         content=chunk_text,
                         char_count=len(chunk_text),
                         word_count=len(chunk_text.split()),
-                        page_numbers=sorted(list(current_pages)),
-                        section_titles=sorted(list(current_sections)),
+                        page_numbers=sorted(current_pages),
+                        section_titles=sorted(current_sections),
                     )
                 )
                 chunk_idx += 1
@@ -79,8 +79,8 @@ class ElementChunker:
                     content=chunk_text,
                     char_count=len(chunk_text),
                     word_count=len(chunk_text.split()),
-                    page_numbers=sorted(list(current_pages)),
-                    section_titles=sorted(list(current_sections)),
+                    page_numbers=sorted(current_pages),
+                    section_titles=sorted(current_sections),
                 )
             )
 

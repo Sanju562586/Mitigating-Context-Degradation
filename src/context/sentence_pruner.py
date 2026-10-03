@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from typing import List, Set, Tuple
 
 # Common stop words to exclude when calculating query term relevance
 _STOP_WORDS = {
@@ -11,7 +10,7 @@ _STOP_WORDS = {
     "by", "for", "with", "about", "against", "between", "into", "through",
     "during", "before", "after", "above", "below", "to", "from", "up",
     "down", "in", "out", "on", "off", "over", "under", "again", "further",
-    "then", "once", "here", "there", "when", "where", "why", "how", "all",
+    "once", "here", "there", "when", "where", "why", "how", "all",
     "any", "both", "each", "few", "more", "most", "other", "some", "such",
     "no", "nor", "not", "only", "own", "same", "so", "than", "too", "very",
     "s", "t", "can", "will", "just", "don", "should", "now", "is", "are",
@@ -31,14 +30,14 @@ class SentencePruner:
         self.default_min_salience = default_min_salience
 
     @staticmethod
-    def split_sentences(text: str) -> List[str]:
+    def split_sentences(text: str) -> list[str]:
         """Split text into individual sentences while preserving sentence content."""
         if not text or not text.strip():
             return []
 
         # First split on line breaks to preserve structural paragraphs
         lines = [line.strip() for line in text.splitlines() if line.strip()]
-        sentences: List[str] = []
+        sentences: list[str] = []
 
         for line in lines:
             parts = _SENTENCE_SPLIT_REGEX.split(line)
@@ -50,12 +49,12 @@ class SentencePruner:
         return sentences
 
     @staticmethod
-    def _extract_terms(text: str) -> Set[str]:
+    def _extract_terms(text: str) -> set[str]:
         """Extract lowercase content terms excluding stop words."""
         words = _WORD_REGEX.findall(text.lower())
         return {w for w in words if w not in _STOP_WORDS and len(w) > 1}
 
-    def compute_salience(self, query_terms: Set[str], sentence: str) -> float:
+    def compute_salience(self, query_terms: set[str], sentence: str) -> float:
         """Compute the informational salience score of a sentence relative to the query.
 
         Combines:
@@ -94,7 +93,7 @@ class SentencePruner:
         query: str,
         text: str,
         min_salience: float | None = None,
-    ) -> Tuple[str, List[str]]:
+    ) -> tuple[str, list[str]]:
         """Filter out non-relevant sentences from a chunk, preserving key evidence.
 
         Args:
@@ -117,13 +116,13 @@ class SentencePruner:
 
         query_terms = self._extract_terms(query)
 
-        scored_sentences: List[Tuple[str, float]] = []
+        scored_sentences: list[tuple[str, float]] = []
         for s in sentences:
             score = self.compute_salience(query_terms, s)
             scored_sentences.append((s, score))
 
         # Filter sentences by salience threshold
-        kept: List[str] = [s for s, score in scored_sentences if score >= threshold]
+        kept: list[str] = [s for s, score in scored_sentences if score >= threshold]
 
         # Fallback preservation: If all sentences fell below threshold, keep top-scoring sentence
         if not kept:

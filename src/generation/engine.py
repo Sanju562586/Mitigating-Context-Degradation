@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 from abc import ABC, abstractmethod
-from typing import Iterator, List, Optional, Tuple
+from collections.abc import Iterator
 
 
 class BaseInferenceEngine(ABC):
@@ -15,7 +15,6 @@ class BaseInferenceEngine(ABC):
     @abstractmethod
     def model_name(self) -> str:
         """Name or identifier of the underlying model."""
-        pass
 
     @abstractmethod
     def generate(
@@ -26,7 +25,6 @@ class BaseInferenceEngine(ABC):
         max_tokens: int = 1024,
     ) -> str:
         """Synchronously generate a complete completion string."""
-        pass
 
     @abstractmethod
     def generate_stream(
@@ -37,7 +35,6 @@ class BaseInferenceEngine(ABC):
         max_tokens: int = 1024,
     ) -> Iterator[str]:
         """Stream token-by-token completion chunks."""
-        pass
 
 
 class OfflineGroundedEngine(BaseInferenceEngine):
@@ -55,9 +52,9 @@ class OfflineGroundedEngine(BaseInferenceEngine):
     def model_name(self) -> str:
         return self._model_name
 
-    def _extract_evidence_passages(self, prompt: str) -> List[Tuple[str, str]]:
+    def _extract_evidence_passages(self, prompt: str) -> list[tuple[str, str]]:
         """Parse (citation_tag, passage_text) from prompt evidence block."""
-        passages: List[Tuple[str, str]] = []
+        passages: list[tuple[str, str]] = []
         # Match patterns like: --- EVIDENCE [Doc 1, Chunk 0] --- or [Doc 1, Chunk 0]
         pattern = r"(?:---\s*EVIDENCE\s*)?(\[Doc\s+[^\]]+\])(?:\s*\(Source:[^)]*\)\s*---)?\s*\n(.*?)(?=(?:---\s*EVIDENCE\s*\[Doc|USER QUERY:|$))"
         matches = re.findall(pattern, prompt, re.DOTALL)
@@ -111,7 +108,7 @@ class OfflineGroundedEngine(BaseInferenceEngine):
         from src.generation.sufficiency import _STOP_WORDS
         content_words = {w for w in query_words if w not in _STOP_WORDS}
 
-        scored_sentences: List[Tuple[float, str, str]] = []
+        scored_sentences: list[tuple[float, str, str]] = []
         for tag, passage in passages:
             # Split into individual sentences
             sentences = re.split(r"(?<=[.!?])\s+", passage)
@@ -168,8 +165,7 @@ class OfflineGroundedEngine(BaseInferenceEngine):
             max_tokens=max_tokens,
         )
         tokens = re.findall(r"\S+\s*", full_text)
-        for token in tokens:
-            yield token
+        yield from tokens
 
 
 class OpenAICompatibleEngine(BaseInferenceEngine):
@@ -177,9 +173,9 @@ class OpenAICompatibleEngine(BaseInferenceEngine):
 
     def __init__(
         self,
-        base_url: Optional[str] = None,
-        api_key: Optional[str] = None,
-        model_name: Optional[str] = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        model_name: str | None = None,
     ) -> None:
         self.base_url = (
             base_url or os.getenv("OPENAI_BASE_URL") or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
@@ -275,7 +271,7 @@ class EngineFactory:
     """Factory creating appropriate inference engine based on provider configuration."""
 
     @staticmethod
-    def create_engine(provider: Optional[str] = None) -> BaseInferenceEngine:
+    def create_engine(provider: str | None = None) -> BaseInferenceEngine:
         selected = (provider or os.getenv("LLM_PROVIDER", "offline")).lower()
         if selected in ("openai", "ollama", "vllm"):
             return OpenAICompatibleEngine()

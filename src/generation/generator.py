@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Iterator, List, Optional
+from collections.abc import Iterator
 
 from src.context.models import CompactedEvidence, OptimizedContext
 from src.generation.engine import (
@@ -42,10 +42,10 @@ class GroundedGenerator:
 
     def __init__(
         self,
-        sufficiency_classifier: Optional[EvidenceSufficiencyClassifier] = None,
-        prompt_synthesizer: Optional[GroundedPromptSynthesizer] = None,
-        engine: Optional[BaseInferenceEngine] = None,
-        verifier: Optional[AntiHallucinationVerifier] = None,
+        sufficiency_classifier: EvidenceSufficiencyClassifier | None = None,
+        prompt_synthesizer: GroundedPromptSynthesizer | None = None,
+        engine: BaseInferenceEngine | None = None,
+        verifier: AntiHallucinationVerifier | None = None,
     ) -> None:
         self.sufficiency_classifier = sufficiency_classifier or default_sufficiency_classifier
         self.prompt_synthesizer = prompt_synthesizer or default_prompt_synthesizer
@@ -55,15 +55,15 @@ class GroundedGenerator:
     def generate(
         self,
         query: str,
-        context: Optional[OptimizedContext] = None,
-        raw_evidence_chunks: Optional[List[CompactedEvidence]] = None,
-        conversation_history: Optional[List[ConversationTurn]] = None,
-        sufficiency_threshold: Optional[float] = None,
-        hallucination_threshold: Optional[float] = None,
+        context: OptimizedContext | None = None,
+        raw_evidence_chunks: list[CompactedEvidence] | None = None,
+        conversation_history: list[ConversationTurn] | None = None,
+        sufficiency_threshold: float | None = None,
+        hallucination_threshold: float | None = None,
         temperature: float = 0.0,
         max_tokens: int = 1024,
-        provider: Optional[str] = None,
-        memory_context: Optional[str] = None,
+        provider: str | None = None,
+        memory_context: str | None = None,
     ) -> GenerationResponse:
         """Execute synchronous grounded generation with pre- and post-generation guardrails."""
         start_time = time.perf_counter()
@@ -163,15 +163,15 @@ class GroundedGenerator:
     def generate_stream(
         self,
         query: str,
-        context: Optional[OptimizedContext] = None,
-        raw_evidence_chunks: Optional[List[CompactedEvidence]] = None,
-        conversation_history: Optional[List[ConversationTurn]] = None,
-        sufficiency_threshold: Optional[float] = None,
-        hallucination_threshold: Optional[float] = None,
+        context: OptimizedContext | None = None,
+        raw_evidence_chunks: list[CompactedEvidence] | None = None,
+        conversation_history: list[ConversationTurn] | None = None,
+        sufficiency_threshold: float | None = None,
+        hallucination_threshold: float | None = None,
         temperature: float = 0.0,
         max_tokens: int = 1024,
-        provider: Optional[str] = None,
-        memory_context: Optional[str] = None,
+        provider: str | None = None,
+        memory_context: str | None = None,
     ) -> Iterator[str]:
         """Stream real-time tokens and guardrail telemetry via Server-Sent Events (SSE)."""
         start_time = time.perf_counter()
@@ -206,7 +206,7 @@ class GroundedGenerator:
 
         # 3. Token Streaming
         engine = EngineFactory.create_engine(provider) if provider else self.engine
-        accumulated_chunks: List[str] = []
+        accumulated_chunks: list[str] = []
 
         yield f"event: start\ndata: {json.dumps({'model': engine.model_name})}\n\n"
 

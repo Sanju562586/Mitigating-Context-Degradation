@@ -43,71 +43,34 @@ This repository implements a **multi-stage evidence retrieval, context optimizat
 ## 🏛️ System Architecture
 
 <p align="center">
-  <img src="docs/assets/system_architecture.svg" alt="System Architecture Diagram" width="100%" />
+  <img src="docs/assets/system_architecture.svg" alt="High-Level System Architecture Diagram" width="100%" />
 </p>
 
-<details>
-<summary><b>🔍 View Pipeline Component Dataflow Details</b></summary>
+The system is organized into four decoupled architectural tiers:
 
-```mermaid
-flowchart TD
-    subgraph Ingestion ["1. Multimodal Document Ingestion & Chunking"]
-        RAW[Raw Files: PDF, DOCX, TXT, MD, HTML] --> PARSE[Structural Parser Engine]
-        PARSE --> CLEAN[Cleaner & Whitespace Normalizer]
-        CLEAN --> CHUNK[Semantic Sliding-Window Chunker]
-    end
+1. **Presentation & Client Tier**:
+   - **Interactive Web Dashboard**: React 18 / Vite single-page application with real-time context visualization, NLI claim inspection, and memory controls.
+   - **Chromium Browser Extension**: Manifest V3 extension providing background context capture, active tab DOM scraping, and bidirectional episodic sync.
+   - **External Clients & SDKs**: REST API consumers, CLI clients, and Server-Sent Events (SSE) token stream listeners.
 
-    subgraph Indexing ["2. Dual Hybrid Indexing"]
-        CHUNK --> EMB[Sentence-Transformers Embeddings]
-        EMB --> FAISS[(Dense FAISS Vector Index)]
-        CHUNK --> BM25[(Sparse Inverted BM25 Index)]
-    end
+2. **API Gateway & Orchestration Layer**:
+   - **FastAPI Gateway**: High-throughput asynchronous routing, Pydantic V2 validation, and rate-limiting middleware.
+   - **Streaming Emitter**: Server-Sent Events (SSE) controller streaming token-by-token generation and live guardrail telemetry.
+   - **Session & Access Controller**: Manages session lifecycles, user isolation, and granular memory permissions (Read/Write/Erase).
+   - **Async Task Dispatcher**: Dispatches background operations such as hierarchical summary condensation and index re-compilation.
 
-    subgraph Retrieval ["3. Hybrid Retrieval & RRF Fusion"]
-        QUERY[User Query / Prompt] --> QP[Query Processing: Intent & Expansion]
-        QP --> DENSE[Dense Vector Similarity Search]
-        QP --> SPARSE[BM25 Exact Lexical Search]
-        FAISS -.-> DENSE
-        BM25 -.-> SPARSE
-        DENSE --> RRF[Reciprocal Rank Fusion RRF k=60]
-        SPARSE --> RRF
-    end
+3. **Core Intelligence & Engine Tier**:
+   - **Multimodal Ingestion & Indexing**: Structural file parsing (PDF, DOCX, TXT, HTML), semantic sliding-window chunking (512 tokens / 128 overlap), dense vector encoding (`all-MiniLM-L6-v2`), and BM25 sparse inverted indexing.
+   - **Hybrid Retrieval & RRF Fusion**: Query intent classification and acronym expansion, dual vector search (FAISS `IndexFlatIP`) + BM25 lexical search, arbitrated via Reciprocal Rank Fusion ($RRF(d) = \sum \frac{1}{60 + r_i(d)}$).
+   - **Context Compaction & Optimization**: Joint query-document cross-attention reranking (`ms-marco-MiniLM-L-6-v2`), extractive salience pruning, semantic cosine deduplication ($\tau \ge 0.85$), and Lost-in-the-Middle boundary reordering.
+   - **Evidence Gating & Grounded Generation**: Pre-flight semantic coverage gate ($\theta$ threshold) with Truthful Abstention Protocol, bracketed citation synthesis, streaming LLM inference, and sentence-level NLI claim verification (*Entailed*, *Neutral*, *Contradicted*).
+   - **External Memory & Client Sync**: Session state registry, episodic vector store for cross-session semantic recall, recursive hierarchical summarizer, and client synchronizer.
 
-    subgraph Optimization ["4. Deep Reranking & Context Compaction"]
-        RRF --> RERANK[Cross-Encoder Cross-Attention Reranker]
-        RERANK --> PRUNE[Dynamic Score Pruning Threshold]
-        PRUNE --> SENT_PRUNE[Salience Sentence Extractor]
-        SENT_PRUNE --> DEDUP[Semantic Cosine Deduplicator]
-        DEDUP --> REORDER[Lost-in-the-Middle Boundary Reorderer]
-        REORDER --> BUDGET[Hard Token Budget Enforcer]
-    end
-
-    subgraph Gating ["5. Evidence Sufficiency Gating"]
-        BUDGET --> SUFF{Sufficiency Gate: Theta Threshold}
-        SUFF -- Score < Theta --> ABSTAIN[Truthful Abstention Protocol]
-        SUFF -- Score >= Theta --> PROMPT[Grounded Prompt Synthesizer]
-    end
-
-    subgraph Generation ["6. Grounded Generation & Anti-Hallucination Guardrails"]
-        PROMPT --> LLM[Inference Engine: Offline / Local / API]
-        LLM --> STREAM[Streaming Token Emitter / SSE]
-        LLM --> NLI[Post-Generation NLI Claim Verifier]
-        NLI --> CLAIMS{Claim Entailment Breakdown}
-        CLAIMS --> ENTAIL[Entailed Claims: Verified]
-        CLAIMS --> NEUT[Neutral Claims: Unverified]
-        CLAIMS --> CONTRA[Contradicted Claims: Refuted]
-        NLI --> CIT_VER[Citation Provenance Verification]
-    end
-
-    subgraph Memory ["7. Cross-Session External Memory & Client Sync"]
-        EXT[Chromium Browser Extension] --> CAPTURE[Web Context Ingestion]
-        CAPTURE --> MEM_STORE[(ACID SQLite DB + FAISS Episodic Memory)]
-        ENTAIL -. Verified Facts .-> MEM_STORE
-        MEM_STORE -. Pre-Inference Injection .-> PROMPT
-        MEM_STORE --> SUMMARIZE[Hierarchical Persistent Summarizer]
-    end
-```
-</details>
+4. **Data & Persistence Tier**:
+   - **Dense Vector Stores**: FAISS indices for document corpus (`index_corpus.faiss`) and episodic user memory (`memory.faiss`).
+   - **Sparse Lexical Stores**: BM25 inverted term index, vocabulary postings, and document frequency tables (`bm25.pkl`).
+   - **Relational Database**: ACID-compliant SQLite with WAL mode indexing sessions, conversation turns, hierarchical summaries, and audit logs.
+   - **Document Repository**: Structured JSON chunk store, citation anchor offsets, and source document provenance.
 
 ---
 

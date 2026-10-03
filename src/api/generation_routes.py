@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, status
 from fastapi.responses import StreamingResponse
@@ -25,11 +25,11 @@ class FullQAPipelineRequest(BaseModel):
     """
 
     query: str = Field(..., description="User search query string.")
-    conversation_history: Optional[List[ConversationTurn]] = Field(
+    conversation_history: list[ConversationTurn] | None = Field(
         default=None,
         description="Optional prior interactive conversational turns.",
     )
-    filters: Optional[Dict[str, Any]] = Field(
+    filters: dict[str, Any] | None = Field(
         default=None,
         description="Optional structured metadata filters.",
     )
@@ -81,11 +81,11 @@ class FullQAPipelineRequest(BaseModel):
         le=4096,
         description="Maximum generation token allowance.",
     )
-    provider: Optional[str] = Field(
+    provider: str | None = Field(
         default=None,
         description="Optional LLM provider override ('offline', 'openai', 'gemini', 'ollama').",
     )
-    session_id: Optional[str] = Field(
+    session_id: str | None = Field(
         default=None,
         description="Optional session ID to enable cross-session external memory sync (Module 7).",
     )
@@ -144,7 +144,7 @@ def run_full_qa_pipeline(payload: FullQAPipelineRequest) -> GenerationResponse:
     7. Post-Inference Memory Sync (verified facts & persistent summaries)
     """
     # 0. Optional Module 7: Pre-Inference Memory Sync
-    memory_context_str: Optional[str] = None
+    memory_context_str: str | None = None
     if payload.session_id:
         from src.memory.synchronizer import default_memory_synchronizer
 
@@ -210,7 +210,7 @@ def run_full_qa_pipeline(payload: FullQAPipelineRequest) -> GenerationResponse:
     status_code=status.HTTP_200_OK,
     summary="Get status and configurations of the grounded generation and guardrails engine",
 )
-def get_generation_status() -> Dict[str, Any]:
+def get_generation_status() -> dict[str, Any]:
     """Retrieve engine status, active provider, and default thresholds."""
     return {
         "status": "ready",

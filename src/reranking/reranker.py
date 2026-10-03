@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-from typing import List, Optional
 
 import numpy as np
 
@@ -28,7 +27,7 @@ class CrossEncoderReranker:
 
     def __init__(
         self,
-        engine: Optional[CrossEncoderEngine] = None,
+        engine: CrossEncoderEngine | None = None,
         default_threshold: float = 0.35,
         default_top_n: int = 5,
     ) -> None:
@@ -65,9 +64,9 @@ class CrossEncoderReranker:
     def rerank(
         self,
         query: str,
-        candidates: List[RetrievedCandidate],
-        threshold: Optional[float] = None,
-        top_n: Optional[int] = None,
+        candidates: list[RetrievedCandidate],
+        threshold: float | None = None,
+        top_n: int | None = None,
         normalization: str = "sigmoid",
     ) -> RankedContext:
         """Score, calibrate, and aggressively prune candidates into a high-precision RankedContext.
@@ -126,8 +125,8 @@ class CrossEncoderReranker:
         scored_candidates.sort(key=lambda item: item["rerank_score"], reverse=True)
 
         # 6. Candidate Pruning Layer: Hard Cutoff (s >= tau) + Top-N Retention
-        retained_chunks: List[RerankedChunk] = []
-        for rank_pos, item in enumerate(scored_candidates, start=1):
+        retained_chunks: list[RerankedChunk] = []
+        for item in scored_candidates:
             if item["rerank_score"] < tau:
                 # Discard candidates falling below the relevance threshold
                 continue
@@ -179,8 +178,8 @@ class CrossEncoderReranker:
     def rerank_retrieval_response(
         self,
         response: RetrievalResponse,
-        threshold: Optional[float] = None,
-        top_n: Optional[int] = None,
+        threshold: float | None = None,
+        top_n: int | None = None,
         normalization: str = "sigmoid",
     ) -> RankedContext:
         """Convenience chaining Module 3 RetrievalResponse into Module 4 reranking."""

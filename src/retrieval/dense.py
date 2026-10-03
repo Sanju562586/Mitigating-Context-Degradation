@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from src.indexing.embeddings import EmbeddingEngine, default_embedding_engine
 from src.indexing.metadata_store import MetadataStore
@@ -20,7 +20,7 @@ class DenseRetriever:
         self,
         vector_index: FaissVectorIndex,
         metadata_store: MetadataStore,
-        embedding_engine: Optional[EmbeddingEngine] = None,
+        embedding_engine: EmbeddingEngine | None = None,
     ) -> None:
         self.vector_index = vector_index
         self.metadata_store = metadata_store
@@ -30,8 +30,8 @@ class DenseRetriever:
         self,
         query: str,
         top_k: int = 25,
-        filters: Optional[Dict[str, Any]] = None,
-    ) -> List[Tuple[str, float]]:
+        filters: dict[str, Any] | None = None,
+    ) -> list[tuple[str, float]]:
         """Run dense vector search for the top_k most similar chunks.
 
         Args:
@@ -60,7 +60,7 @@ class DenseRetriever:
         if not filters:
             return raw_results[:top_k]
 
-        filtered_results: List[Tuple[str, float]] = []
+        filtered_results: list[tuple[str, float]] = []
         for chunk_id, score in raw_results:
             record = self.metadata_store.get(chunk_id)
             if record and self._matches_filters(record, filters):
@@ -71,7 +71,7 @@ class DenseRetriever:
         return filtered_results
 
     @staticmethod
-    def _matches_filters(record: Dict[str, Any], filters: Dict[str, Any]) -> bool:
+    def _matches_filters(record: dict[str, Any], filters: dict[str, Any]) -> bool:
         """Check whether a chunk metadata record satisfies all filter criteria."""
         chunk_meta = record.get("metadata", {})
         for key, target_val in filters.items():
