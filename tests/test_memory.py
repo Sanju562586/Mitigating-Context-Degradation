@@ -2,8 +2,9 @@
 
 import shutil
 import tempfile
-from fastapi.testclient import TestClient
+
 import pytest
+from fastapi.testclient import TestClient
 
 from src.api.app import app
 from src.generation.models import (

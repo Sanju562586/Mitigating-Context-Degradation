@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import datetime
-from typing import List, Optional
 import uuid
+from typing import List, Optional
 
 from src.generation.models import ClaimStatus, GroundingReport
 from src.memory.models import (
@@ -15,7 +15,10 @@ from src.memory.models import (
 )
 from src.memory.session_registry import SessionRegistry, default_session_registry
 from src.memory.store import ExternalMemoryStore, default_memory_store
-from src.memory.summarizer import HierarchicalSummarizer, default_hierarchical_summarizer
+from src.memory.summarizer import (
+    HierarchicalSummarizer,
+    default_hierarchical_summarizer,
+)
 
 
 class CrossSessionMemorySynchronizer:
