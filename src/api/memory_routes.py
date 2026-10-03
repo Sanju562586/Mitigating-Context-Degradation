@@ -11,7 +11,6 @@ from pydantic import BaseModel, Field
 from src.memory.models import (
     EpisodicMemoryItem,
     HierarchicalSummary,
-    MemoryExport,
     MemoryPermissions,
     MemorySearchQuery,
     MemorySearchResult,
