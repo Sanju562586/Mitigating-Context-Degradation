@@ -42,6 +42,7 @@ class IndexManager:
         """Index a document's chunks across Vector Index, BM25 Index, and Metadata Store."""
         chunks = document.chunks
         if not chunks:
+            self.remove_document(document.id)
             return {
                 "document_id": document.id,
                 "indexed_chunks": 0,
@@ -51,14 +52,17 @@ class IndexManager:
         # 1. Generate L2-normalized embeddings using sentence-transformers
         embeddings = self.embedding_engine.embed_chunks(chunks)
 
-        # 2. Add to FAISS Vector Index
-        self.vector_index.add_chunks(chunks, embeddings)
-
-        # 3. Add to BM25 Sparse Index (ready for Module 3 hybrid retrieval)
-        self.bm25_index.add_chunks(chunks)
-
-        # 4. Add to Metadata Store
-        self.metadata_store.add_chunks(chunks)
+        # Replace any previous version before adding: document and chunk IDs are
+        # deterministic, so appending again would leave duplicate FAISS/BM25 rows.
+        self.remove_document(document.id)
+        try:
+            self.vector_index.add_chunks(chunks, embeddings)
+            self.bm25_index.add_chunks(chunks)
+            self.metadata_store.add_chunks(chunks)
+        except Exception:
+            # Keep all indexes in sync if any later write fails.
+            self.remove_document(document.id)
+            raise
 
         return {
             "document_id": document.id,

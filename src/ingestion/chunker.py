@@ -19,11 +19,15 @@ class ElementChunker:
         target_chars: int | None = None,
         overlap_chars: int | None = None,
     ) -> None:
+        if target_words < 1:
+            raise ValueError("target_words must be at least 1")
+        if overlap_words < 0:
+            raise ValueError("overlap_words cannot be negative")
         self.target_words = target_words
-        self.overlap_words = overlap_words
+        self.overlap_words = min(overlap_words, target_words - 1)
         # Approximate 6 characters per word as fallback
         self.target_chars = target_chars or (target_words * 6)
-        self.overlap_chars = overlap_chars or (overlap_words * 6)
+        self.overlap_chars = overlap_chars or (self.overlap_words * 6)
 
     def chunk_elements(
         self,
@@ -39,53 +43,16 @@ class ElementChunker:
             return self._chunk_plain_text(doc_id, raw_text)
 
         chunks: list[DocumentChunk] = []
-        current_texts: list[str] = []
+        current_words: list[str] = []
         current_pages: set[int] = set()
         current_sections: set[str] = set()
-        current_word_count = 0
         chunk_idx = 0
 
-        for el in elements:
-            text = el.content.strip()
-            if not text:
-                continue
-
-            if el.page_number is not None:
-                current_pages.add(el.page_number)
-            if el.section_title:
-                current_sections.add(el.section_title)
-
-            el_words = len(text.split())
-
-            # If adding this element exceeds target words and we already have content, flush current
-            if current_word_count > 0 and (current_word_count + el_words > self.target_words):
-                chunk_text = "\n\n".join(current_texts).strip()
-                chunks.append(
-                    DocumentChunk(
-                        id=f"{doc_id}_chunk_{chunk_idx}",
-                        document_id=doc_id,
-                        chunk_index=chunk_idx,
-                        content=chunk_text,
-                        char_count=len(chunk_text),
-                        word_count=len(chunk_text.split()),
-                        page_numbers=sorted(current_pages),
-                        section_titles=sorted(current_sections),
-                    )
-                )
-                chunk_idx += 1
-
-                # Reset accumulator with trailing overlap words if applicable
-                current_texts = [text]
-                current_word_count = el_words
-                current_pages = {el.page_number} if el.page_number is not None else set()
-                current_sections = {el.section_title} if el.section_title else set()
-            else:
-                current_texts.append(text)
-                current_word_count += el_words
-
-        # Flush final chunk
-        if current_texts:
-            chunk_text = "\n\n".join(current_texts).strip()
+        def flush() -> None:
+            nonlocal chunk_idx, current_words, current_pages, current_sections
+            if not current_words:
+                return
+            chunk_text = " ".join(current_words).strip()
             chunks.append(
                 DocumentChunk(
                     id=f"{doc_id}_chunk_{chunk_idx}",
@@ -98,6 +65,41 @@ class ElementChunker:
                     section_titles=sorted(current_sections),
                 )
             )
+            chunk_idx += 1
+            overlap = current_words[-self.overlap_words:] if self.overlap_words else []
+            current_words = overlap
+            current_pages = set()
+            current_sections = set()
+
+        for el in elements:
+            text = el.content.strip()
+            if not text:
+                continue
+            words = text.split()
+            offset = 0
+            while offset < len(words):
+                available = self.target_words - len(current_words)
+                if available <= 0:
+                    flush()
+                    available = self.target_words - len(current_words)
+                take = min(available, len(words) - offset)
+                current_words.extend(words[offset : offset + take])
+                offset += take
+                if el.page_number is not None:
+                    current_pages.add(el.page_number)
+                if el.section_title:
+                    current_sections.add(el.section_title)
+                if len(current_words) >= self.target_words and offset < len(words):
+                    flush()
+            # Preserve an element boundary when the next element would overflow.
+            if len(current_words) >= self.target_words:
+                flush()
+
+        # Flush final chunk
+        if current_words:
+            # Do not emit a trailing chunk consisting only of the prior overlap.
+            if not chunks or len(current_words) > self.overlap_words:
+                flush()
 
         return chunks
 
