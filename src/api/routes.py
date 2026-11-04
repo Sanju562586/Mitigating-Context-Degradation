@@ -54,10 +54,11 @@ async def upload_document(
             file_size_bytes=len(content_bytes),
             document_type=document_type,
         )
-        default_store.add(doc)
-
         # Index chunks: Sentence-Transformers L2 embeddings -> FAISS + BM25 + Metadata Store
         idx_res = default_index_manager.index_document(doc)
+        # Publish the document only after indexing succeeds, so a failed request
+        # cannot leave a document that retrieval cannot find.
+        default_store.add(doc)
 
         return IngestResponse(
             success=True,
@@ -100,10 +101,9 @@ def ingest_text(payload: RawTextInput) -> IngestResponse:
             file_size_bytes=len(content_bytes),
             document_type=payload.document_type,
         )
-        default_store.add(doc)
-
         # Index chunks: Sentence-Transformers L2 embeddings -> FAISS + BM25 + Metadata Store
         idx_res = default_index_manager.index_document(doc)
+        default_store.add(doc)
 
         return IngestResponse(
             success=True,
