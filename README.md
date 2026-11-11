@@ -43,7 +43,7 @@ This repository implements a **multi-stage evidence retrieval, context optimizat
 ## 🏛️ System Architecture
 
 <p align="center">
-  <img src="docs/assets/system_architecture.svg" alt="High-Level System Architecture Diagram" width="100%" />
+  <img src="docs/assets/system_architecture.png" alt="High-Level System Architecture Diagram" width="100%" />
 </p>
 
 The system architecture is structured into decoupled, high-performance layers centered around the **External Memory System (Orchestrator)**:
@@ -57,7 +57,7 @@ The system architecture is structured into decoupled, high-performance layers ce
 - **1. Ingestion Module**:
   - `File Loader`: Multi-format parsers for PDF, DOCX, TXT, MD, and HTML.
   - `Text Splitter`: Structural normalization and boundary-aware decomposition.
-  - `Word based chunking (220 size + 30 overlap)`: Strict sliding window chunking producing cohesive 220-word units with 30-word boundary overlaps to eliminate context seams.
+  - `Semantic Chunking (boundary-aware + 50 token overlap)`: Boundary-aware semantic decomposition (sections, headings, tables, paragraphs) maintaining a 50-token overlap between consecutive chunks to preserve contextual continuity.
   - `Store Vectors`: Automatically writes vectorized representations into the external FAISS index.
 - **2. Retrieval Module**:
   - `Query Processor`: Intent classification, conversational rewriting, and metadata filter extraction.
@@ -84,7 +84,7 @@ The system architecture is structured into decoupled, high-performance layers ce
 ### 4. External Memory (Vector Database)
 - **FAISS Index**:
   - `Embeddings`: L2-normalized dense embeddings for instant vector similarity lookup.
-  - `Chunks`: Granular text chunks (220-word windows) mapped to citation tags.
+  - `Chunks`: Granular semantic text chunks (boundary-aware with 50-token overlap) mapped to citation tags.
   - `Metadata`: Provenance tracking including source titles, page numbers, heading paths, and offsets.
 
 ### 5. Storage Tier
@@ -162,7 +162,7 @@ The system architecture is structured into decoupled, high-performance layers ce
 ### 1. Side-by-Side Comparison Interface (Context Rot Workspace)
 - **Side-by-Side Evaluation**: Concurrently evaluates the exact same query on the uploaded document using two distinct architectures:
   1. **Naive LLM (Entire Document)**: Provided directly with the full raw document and query. Subject to context degradation, attention decay (Lost-in-the-Middle), and unverified assertions.
-  2. **Our Application (Full Pipeline)**: Processed through the entire multi-stage pipeline: Ingestion (220 words + 30 overlap) $\rightarrow$ Hybrid Retrieval (FAISS + BM25) $\rightarrow$ Context Assembly $\rightarrow$ Grounded LLM Generation with bracketed citations $\rightarrow$ Memory Update.
+  2. **Our Application (Full Pipeline)**: Processed through the entire multi-stage pipeline: Ingestion (Semantic Chunking with 50-token overlap) $\rightarrow$ Hybrid Retrieval (FAISS + BM25) $\rightarrow$ Context Assembly $\rightarrow$ Grounded LLM Generation with bracketed citations $\rightarrow$ Memory Update.
 - **Minimalist, Clutter-Free Presentation**: Clear side-by-side cards highlighting grounded responses with verified citation tags (`[Doc 1, Chunk 0]`).
 - **Flexible LLM Provider Engine**: Seamlessly switch inference between Ollama, ChatGPT, Claude, Gemini, or deterministic Offline execution.
 
@@ -259,6 +259,8 @@ npm run dev
 
 ## 📡 API Reference
 
+The local API does not require user authentication. Documents and memory are available in one shared workspace to any client that can reach the backend.
+
 ### Core Pipeline & Inference
 
 | Method | Endpoint | Description |
@@ -285,7 +287,7 @@ npm run dev
 
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
-| `GET` | `/api/memory/sessions` | List active user conversational sessions. |
+| `GET` | `/api/memory/sessions` | List conversational sessions in the shared workspace. |
 | `POST` | `/api/memory/sessions` | Create a new conversational workspace session. |
 | `GET` | `/api/memory/sessions/{id}` | Get session details, chronological turns, and persistent summaries. |
 | `PATCH` | `/api/memory/sessions/{id}` | Update session title, active document scope, or archive status. |
@@ -304,7 +306,7 @@ The **Evaluate** tab runs annotated query sets against the live application inde
 
 ## 🧪 Testing & Verification
 
-The project includes **14 comprehensive test suites** covering all modular subsystems:
+The project includes **15 comprehensive test suites** covering all modular subsystems:
 
 ```bash
 # Run entire test suite
@@ -336,45 +338,6 @@ ruff check --fix src/ tests/
 
 ---
 
-## 📂 Repository Layout
-
-```text
-Mitigating-Context-Degradation/
-├── src/
-│   ├── api/                  # FastAPI REST routes and application entry point
-│   │   ├── app.py            # Unified FastAPI application
-│   │   ├── routes.py         # Document ingestion routes
-│   │   ├── query_routes.py   # Query processing routes
-│   │   ├── retrieval_routes.py # Hybrid retrieval routes
-│   │   ├── rerank_routes.py  # Cross-encoder reranking routes
-│   │   ├── context_routes.py # Context compaction routes
-│   │   ├── generation_routes.py # Grounded QA and streaming routes
-│   │   └── memory_routes.py  # Cross-session external memory routes
-│   ├── ingestion/            # Multi-format document loading and parsing
-│   ├── cleaning/             # Text cleaning and whitespace normalization
-│   ├── chunking/             # Overlapping sliding-window chunker
-│   ├── indexing/             # FAISS dense index and BM25 sparse inverted index
-│   ├── query_processing/     # Intent detection, rewriter, and metadata filters
-│   ├── retrieval/            # Hybrid retrieval coordinator and RRF fusion
-│   ├── reranking/            # Deep cross-encoder reranker and score pruner
-│   ├── context/              # Extractive compaction, deduplication, and reordering
-│   ├── generation/           # Sufficiency gate, generator, and anti-hallucination verifier
-│   └── memory/               # SQLite store, episodic vectors, session registry, and summarizer
-├── frontend/                 # Next.js 14 Web Application
-│   ├── src/
-│   │   ├── app/              # Next.js App Router (page.tsx, layout.tsx)
-│   │   ├── components/       # GroundedQA, DocumentInspector, CrossSessionMemory, Navbar
-│   │   └── lib/              # Type-safe API client and TypeScript definitions
-│   └── extension/            # Chromium Manifest V3 Browser Extension
-├── tests/                    # 14 Comprehensive pytest test suites
-├── data/                     # Local document storage and persistent SQLite/FAISS indexes
-├── pyproject.toml            # Project build configuration and package metadata
-├── requirements.txt          # Python dependencies
-└── README.md                 # Project documentation
-```
-
----
-
 ## 👥 Contributors
 
 - **Polabathina Ramcharan Teja** ([@print-ramcharan](https://github.com/print-ramcharan))
@@ -385,4 +348,3 @@ Mitigating-Context-Degradation/
 ## 📄 License
 
 This project is licensed under the [MIT License](LICENSE).
-

@@ -19,7 +19,9 @@ import tracemalloc
 from pathlib import Path
 from typing import Any
 
+from src.chunking.tokenizer import count_tokens
 from src.context.compactor import ContextCompactor
+from src.generation.engine import EngineFactory
 from src.generation.generator import GroundedGenerator
 from src.indexing.manager import IndexManager
 from src.reranking.reranker import CrossEncoderReranker
@@ -110,7 +112,11 @@ def _gpu_mb() -> float | None:
 
 
 def run_benchmark(
-    dataset: Path, output: Path, index_dir: Path, generate: bool = True
+    dataset: Path,
+    output: Path,
+    index_dir: Path,
+    generate: bool = True,
+    provider: str | None = None,
 ) -> dict[str, Any]:
     rows = [
         json.loads(line)
@@ -133,7 +139,8 @@ def run_benchmark(
     hybrid = HybridRetriever(index_manager=index)
     reranker = CrossEncoderReranker()
     compactor = ContextCompactor()
-    generator = GroundedGenerator()
+    engine = EngineFactory.create_engine(provider) if provider else None
+    generator = GroundedGenerator(engine=engine)
     try:
         import torch
 
@@ -172,6 +179,7 @@ def run_benchmark(
         conventional_answer = ""
         conventional_latency = math.nan
         full_pipeline_latency = math.nan
+        conventional_tokens = math.nan
         if generate:
             compacted = compactor.compact(query=query, chunks=ce.chunks)
             generation = generator.generate(query=query, context=compacted)
@@ -181,6 +189,7 @@ def run_benchmark(
                 for chunk_id, _ in dn
                 if index.metadata_store.get(chunk_id)
             )
+            conventional_tokens = count_tokens(baseline_context)
             start = time.perf_counter()
             conventional_answer = generator.engine.generate(
                 prompt=f"Context:\n{baseline_context}\n\nQuestion: {query}\nAnswer:",
@@ -198,14 +207,19 @@ def run_benchmark(
         }
         for method in methods:
             scores = retrieval_metrics(rank_by_method[method], relevant)
-            pred_citations = set(rank_by_method[method])
+            is_full = method == "Full Pipeline"
+            if is_full and generate and compacted and compacted.evidence_items:
+                pred_citations = {e.chunk_id for e in compacted.evidence_items}
+            elif method == "Conventional RAG" and generate:
+                pred_citations = {chunk_id for chunk_id, _ in dn}
+            else:
+                pred_citations = set(rank_by_method[method])
             citation_precision = citation_recall = math.nan
             gold_citations = set(map(str, q.get("gold_citation_ids", [])))
             if gold_citations:
                 citation_precision, citation_recall = citation_scores(
                     pred_citations, gold_citations
                 )
-            is_full = method == "Full Pipeline"
             answer = (
                 generation.answer
                 if is_full and generation
@@ -237,7 +251,11 @@ def run_benchmark(
                     ),
                     "input_tokens": compacted.total_tokens
                     if is_full and generation
-                    else math.nan,
+                    else (
+                        conventional_tokens
+                        if method == "Conventional RAG" and generate
+                        else math.nan
+                    ),
                     "answer_abstained": generation.abstained
                     if is_full and generation
                     else "",
@@ -410,11 +428,21 @@ def main() -> None:
     parser.add_argument(
         "--no-generate", action="store_true", help="Skip generation and QA metrics"
     )
+    parser.add_argument(
+        "--provider",
+        type=str,
+        default="offline",
+        help="Inference engine provider (offline, gemini, groq, openrouter)",
+    )
     args = parser.parse_args()
     print(
         json.dumps(
             run_benchmark(
-                args.dataset, args.output, args.index_dir, not args.no_generate
+                args.dataset,
+                args.output,
+                args.index_dir,
+                not args.no_generate,
+                args.provider,
             ),
             indent=2,
         )
