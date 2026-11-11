@@ -54,6 +54,9 @@ data/auth/
 results/
 experiments/results/
 
+# Documentation and paper drafts
+docs/
+
 # Logs
 logs/
 *.log
