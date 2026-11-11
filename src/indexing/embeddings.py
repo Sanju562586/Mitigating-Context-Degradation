@@ -7,6 +7,8 @@ import numpy as np
 # pyrefly: ignore [missing-import]
 from sentence_transformers import SentenceTransformer
 
+from src.cache import LruTtlCache
+
 # pyrefly: ignore [missing-import]
 from src.ingestion.models import DocumentChunk
 
@@ -24,12 +26,18 @@ class EmbeddingEngine:
     def __init__(self, model_name: str = DEFAULT_EMBEDDING_MODEL) -> None:
         self.model_name = model_name
         self._model: SentenceTransformer | None = None
+        self.query_cache: LruTtlCache[str, np.ndarray] = LruTtlCache(
+            max_size=4096, ttl_seconds=600
+        )
 
     @property
     def model(self) -> SentenceTransformer:
         """Lazy-load the sentence-transformers model."""
         if self._model is None:
-            self._model = SentenceTransformer(self.model_name)
+            try:
+                self._model = SentenceTransformer(self.model_name, local_files_only=True)
+            except Exception:
+                self._model = SentenceTransformer(self.model_name)
         return self._model
 
     @property
@@ -76,7 +84,9 @@ class EmbeddingEngine:
         # Guarantee strict L2 normalization
         return self.normalize_l2(vectors)
 
-    def embed_chunks(self, chunks: list[DocumentChunk], batch_size: int = 32) -> np.ndarray:
+    def embed_chunks(
+        self, chunks: list[DocumentChunk], batch_size: int = 32
+    ) -> np.ndarray:
         """Extract text from chunks and generate L2-normalized embeddings."""
         if not chunks:
             return np.empty((0, self.dimension), dtype=np.float32)
@@ -89,13 +99,21 @@ class EmbeddingEngine:
         if not query.strip():
             return np.zeros(self.dimension, dtype=np.float32)
 
+        normalized_query = " ".join(query.split())
+        cache_key = f"{self.model_name}:{normalized_query.casefold()}"
+        cached = self.query_cache.get(cache_key)
+        if cached is not None:
+            return cached.copy()
+
         vec = self.model.encode(
-            [query],
+            [normalized_query],
             show_progress_bar=False,
             convert_to_numpy=True,
             normalize_embeddings=True,
         )[0]
-        return self.normalize_l2(np.asarray(vec, dtype=np.float32))
+        vector = self.normalize_l2(np.asarray(vec, dtype=np.float32))
+        self.query_cache.set(cache_key, vector.copy())
+        return vector
 
 
 default_embedding_engine = EmbeddingEngine()

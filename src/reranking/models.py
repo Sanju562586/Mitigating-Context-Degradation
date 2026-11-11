@@ -15,7 +15,9 @@ class RerankedChunk(BaseModel):
     chunk_id: str = Field(..., description="Unique chunk identifier.")
     content: str = Field(..., description="Text content of the chunk.")
     document_id: str = Field(..., description="Parent document identifier.")
-    chunk_index: int = Field(default=0, description="0-indexed position within parent document.")
+    chunk_index: int = Field(
+        default=0, description="0-indexed position within parent document."
+    )
     metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Standardized chunk metadata tags (e.g. source, page, section, doc_type).",
@@ -51,15 +53,15 @@ class RerankingRequest(BaseModel):
         description="Candidate chunks from Module 3 (e.g. Top-20 RRF pool).",
     )
     threshold: float = Field(
-        default=0.35,
+        default=0.15,
         ge=0.0,
         le=1.0,
-        description="Hard cutoff relevance threshold tau; chunks with s < tau are dropped.",
+        description="Relevance cutoff threshold tau for candidate pruning.",
     )
     top_n: int = Field(
-        default=5,
+        default=20,
         ge=1,
-        le=20,
+        le=50,
         description="Maximum number of top-scoring candidates to retain for the context window.",
     )
     normalization: str = Field(

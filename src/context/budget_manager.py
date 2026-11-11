@@ -15,8 +15,31 @@ class TokenBudgetManager:
       <compacted evidence text>
     """
 
-    def __init__(self, default_budget: int = 1500) -> None:
+    def __init__(self, default_budget: int = 4000) -> None:
         self.default_budget = default_budget
+
+    @staticmethod
+    def get_adaptive_budget(intent: str | None, max_budget: int = 4000) -> int:
+        """Dynamically size token budget according to query intent to eliminate token bloat.
+
+        - Factual / Keyword Lookup: ~700 tokens (1-2 high-precision chunks)
+        - Comparison: ~2,000 tokens (balanced multi-perspective chunks)
+        - Summary / Synthesis: ~3,500 tokens (broad document coverage)
+        """
+        if not intent:
+            return max_budget
+        norm_intent = str(intent).lower()
+        if (
+            "factual" in norm_intent
+            or "factoid" in norm_intent
+            or "keyword" in norm_intent
+        ):
+            return min(max_budget, 700)
+        elif "comparison" in norm_intent:
+            return min(max_budget, 2000)
+        elif "summary" in norm_intent or "synthesis" in norm_intent:
+            return min(max_budget, 3500)
+        return max_budget
 
     @staticmethod
     def generate_citation_tag(
@@ -33,7 +56,9 @@ class TokenBudgetManager:
         metadata: dict[str, Any],
     ) -> str:
         """Format an individual evidence section with citation header and source provenance."""
-        source_name = metadata.get("source", metadata.get("source_name", "Unknown Source"))
+        source_name = metadata.get(
+            "source", metadata.get("source_name", "Unknown Source")
+        )
         page = metadata.get("page")
         section = metadata.get("section")
 

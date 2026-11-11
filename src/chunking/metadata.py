@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,7 +28,16 @@ class MetadataTagger:
             return "doc"
 
         # If contains common domain suffixes like 'handbook', 'manual', 'policy', 'paper'
-        for keyword in ("handbook", "policy", "spec", "report", "paper", "guide", "manual", "contract"):
+        for keyword in (
+            "handbook",
+            "policy",
+            "spec",
+            "report",
+            "paper",
+            "guide",
+            "manual",
+            "contract",
+        ):
             if keyword in parts:
                 return keyword
 
@@ -44,7 +54,9 @@ class MetadataTagger:
     ) -> str:
         """Infer or format document_type (e.g. 'HR_POLICY', 'RESEARCH_PAPER', 'TECHNICAL_SPEC')."""
         if explicit_type and explicit_type.strip():
-            return re.sub(r"[^a-zA-Z0-9]+", "_", explicit_type.strip()).upper().strip("_")
+            return (
+                re.sub(r"[^a-zA-Z0-9]+", "_", explicit_type.strip()).upper().strip("_")
+            )
 
         haystack = f"{source_name} {text_sample}".lower()
 
@@ -114,11 +126,23 @@ class MetadataTagger:
             return "LEGAL_CONTRACT"
 
         # User guide / Manual
-        if any(k in haystack for k in ("user guide", "instruction manual", "quickstart", "how to")):
+        if any(
+            k in haystack
+            for k in ("user guide", "instruction manual", "quickstart", "how to")
+        ):
             return "USER_MANUAL"
 
         # Financial
-        if any(k in haystack for k in ("balance sheet", "quarterly earnings", "revenue", "fiscal year", "10-k")):
+        if any(
+            k in haystack
+            for k in (
+                "balance sheet",
+                "quarterly earnings",
+                "revenue",
+                "fiscal year",
+                "10-k",
+            )
+        ):
             return "FINANCIAL_REPORT"
 
         return "GENERAL_DOC"
@@ -130,6 +154,7 @@ class MetadataTagger:
         page: int | None,
         section: str | None,
         sequence_num: int,
+        document_id: str | None = None,
     ) -> str:
         """Generate a clean semantic chunk ID adhering to the format: {slug}_{page}_{seq:03d}.
 
@@ -137,7 +162,13 @@ class MetadataTagger:
         """
         slug = cls.extract_source_slug(source_name)
         page_part = str(page) if page is not None else "0"
-        return f"{slug}_{page_part}_{sequence_num:03d}"
+        chunk_id = f"{slug}_{page_part}_{sequence_num:03d}"
+        if document_id:
+            document_suffix = hashlib.sha256(document_id.encode("utf-8")).hexdigest()[
+                :16
+            ]
+            chunk_id = f"{chunk_id}_{document_suffix}"
+        return chunk_id
 
     @classmethod
     def build_chunk_metadata(
@@ -151,6 +182,7 @@ class MetadataTagger:
         token_count: int,
         overlap_token_count: int = 0,
         extra: dict[str, Any] | None = None,
+        document_id: str | None = None,
     ) -> dict[str, Any]:
         """Construct the standardized metadata payload for a chunk.
 
@@ -164,7 +196,9 @@ class MetadataTagger:
           "created_at": "2026-09-19"
         }
         """
-        chunk_id = cls.generate_chunk_id(source_name, page, section, sequence_num)
+        chunk_id = cls.generate_chunk_id(
+            source_name, page, section, sequence_num, document_id=document_id
+        )
         created_at_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
         meta: dict[str, Any] = {
@@ -183,9 +217,42 @@ class MetadataTagger:
             "has_code": "```" in content,
         }
 
+        # Auto-extract year if present in source_name or content
+        clean_source = re.sub(r"[\W_]+", " ", source_name)
+        year_match = re.search(r"\b(19\d{2}|20\d{2})\b", clean_source)
+        if not year_match and content:
+            clean_content = re.sub(r"[\W_]+", " ", content[:300])
+            year_match = re.search(r"\b(19\d{2}|20\d{2})\b", clean_content)
+        if year_match:
+            meta["year"] = int(year_match.group(1))
+
+        # Auto-extract department if present in source_name or section
+        search_dept_text = re.sub(
+            r"[\W_]+", " ", f"{source_name} {section or ''}".lower()
+        )
+        for dept_raw, dept_std in (
+            ("engineering", "engineering"),
+            ("tech", "engineering"),
+            ("software", "engineering"),
+            ("human resources", "hr"),
+            ("hr", "hr"),
+            ("finance", "finance"),
+            ("accounting", "finance"),
+            ("marketing", "marketing"),
+            ("legal", "legal"),
+            ("operations", "operations"),
+            ("ops", "operations"),
+            ("sales", "sales"),
+            ("product", "product"),
+            ("security", "security"),
+            ("it", "it"),
+        ):
+            if re.search(rf"\b{re.escape(dept_raw)}\b", search_dept_text):
+                meta["department"] = dept_std
+                break
+
         if extra:
             for k, v in extra.items():
-                if k not in meta:
-                    meta[k] = v
+                meta[k] = v
 
         return meta

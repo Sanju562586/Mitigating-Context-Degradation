@@ -6,55 +6,265 @@ import re
 
 # Common stop words and document-framing meta words to exclude
 _STOP_WORDS = {
-    "a", "an", "the", "and", "or", "but", "if", "then", "of", "at",
-    "by", "for", "with", "about", "against", "between", "into", "through",
-    "during", "before", "after", "above", "below", "to", "from", "up",
-    "down", "in", "out", "on", "off", "over", "under", "again", "further",
-    "once", "here", "there", "when", "where", "why", "how", "all",
-    "any", "both", "each", "few", "more", "most", "other", "some", "such",
-    "no", "nor", "not", "only", "own", "same", "so", "than", "too", "very",
-    "s", "t", "can", "will", "just", "don", "should", "now", "is", "are",
-    "was", "were", "be", "been", "being", "have", "has", "had", "do", "does",
-    "did", "doing", "i", "me", "my", "we", "our", "you", "your", "he", "him",
-    "his", "she", "her", "it", "its", "they", "them", "their", "what", "which",
+    "a",
+    "an",
+    "the",
+    "and",
+    "or",
+    "but",
+    "if",
+    "then",
+    "of",
+    "at",
+    "by",
+    "for",
+    "with",
+    "about",
+    "against",
+    "between",
+    "into",
+    "through",
+    "during",
+    "before",
+    "after",
+    "above",
+    "below",
+    "to",
+    "from",
+    "up",
+    "down",
+    "in",
+    "out",
+    "on",
+    "off",
+    "over",
+    "under",
+    "again",
+    "further",
+    "once",
+    "here",
+    "there",
+    "when",
+    "where",
+    "why",
+    "how",
+    "all",
+    "any",
+    "both",
+    "each",
+    "few",
+    "more",
+    "most",
+    "other",
+    "some",
+    "such",
+    "no",
+    "nor",
+    "not",
+    "only",
+    "own",
+    "same",
+    "so",
+    "than",
+    "too",
+    "very",
+    "s",
+    "t",
+    "can",
+    "will",
+    "just",
+    "don",
+    "should",
+    "now",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "being",
+    "have",
+    "has",
+    "had",
+    "do",
+    "does",
+    "did",
+    "doing",
+    "i",
+    "me",
+    "my",
+    "we",
+    "our",
+    "you",
+    "your",
+    "he",
+    "him",
+    "his",
+    "she",
+    "her",
+    "it",
+    "its",
+    "they",
+    "them",
+    "their",
+    "what",
+    "which",
     # Document framing / meta terms
-    "document", "documents", "doc", "docs", "file", "files",
-    "text", "texts", "article", "articles", "paper", "papers",
-    "passage", "passages", "content", "contents", "context", "contexts",
-    "mention", "mentions", "mentioned", "mentioning",
-    "give", "given", "provide", "provided", "state", "stated", "states",
-    "tell", "told", "say", "said", "says", "list", "listed", "lists",
-    "show", "shows", "describe", "describes", "explain", "explains",
+    "document",
+    "documents",
+    "doc",
+    "docs",
+    "file",
+    "files",
+    "text",
+    "texts",
+    "article",
+    "articles",
+    "paper",
+    "papers",
+    "passage",
+    "passages",
+    "content",
+    "contents",
+    "context",
+    "contexts",
+    "mention",
+    "mentions",
+    "mentioned",
+    "mentioning",
+    "give",
+    "given",
+    "provide",
+    "provided",
+    "state",
+    "stated",
+    "states",
+    "tell",
+    "told",
+    "say",
+    "said",
+    "says",
+    "list",
+    "listed",
+    "lists",
+    "show",
+    "shows",
+    "describe",
+    "describes",
+    "explain",
+    "explains",
 }
 
 _SEMANTIC_SYNONYMS: dict[str, set[str]] = {
     "skill": {
-        "qualification", "qualifications", "requirement", "requirements",
-        "competency", "competencies", "proficiency", "proficiencies",
-        "ability", "abilities", "knowledge", "fundamentals", "expertise",
-        "experience", "programming", "technology", "technologies", "tools",
-        "python", "sql", "engineering", "responsibilities", "duties",
+        "qualification",
+        "qualifications",
+        "requirement",
+        "requirements",
+        "competency",
+        "competencies",
+        "proficiency",
+        "proficiencies",
+        "ability",
+        "abilities",
+        "knowledge",
+        "fundamentals",
+        "expertise",
+        "experience",
+        "programming",
+        "technology",
+        "technologies",
+        "tools",
+        "python",
+        "sql",
+        "engineering",
+        "responsibilities",
+        "duties",
     },
     "skills": {
-        "qualification", "qualifications", "requirement", "requirements",
-        "competency", "competencies", "proficiency", "proficiencies",
-        "ability", "abilities", "knowledge", "fundamentals", "expertise",
-        "experience", "programming", "technology", "technologies", "tools",
-        "python", "sql", "engineering", "responsibilities", "duties",
+        "qualification",
+        "qualifications",
+        "requirement",
+        "requirements",
+        "competency",
+        "competencies",
+        "proficiency",
+        "proficiencies",
+        "ability",
+        "abilities",
+        "knowledge",
+        "fundamentals",
+        "expertise",
+        "experience",
+        "programming",
+        "technology",
+        "technologies",
+        "tools",
+        "python",
+        "sql",
+        "engineering",
+        "responsibilities",
+        "duties",
     },
-    "qualification": {"skill", "skills", "requirement", "requirements", "fundamentals", "experience", "education"},
-    "qualifications": {"skill", "skills", "requirement", "requirements", "fundamentals", "experience", "education"},
-    "responsibility": {"duties", "tasks", "role", "work", "responsibilities", "solutions", "develop", "build"},
-    "responsibilities": {"duties", "tasks", "role", "work", "responsibility", "solutions", "develop", "build"},
-    "salary": {"compensation", "pay", "rate", "wage", "wages", "stipend", "remuneration", "benefits"},
+    "qualification": {
+        "skill",
+        "skills",
+        "requirement",
+        "requirements",
+        "fundamentals",
+        "experience",
+        "education",
+    },
+    "qualifications": {
+        "skill",
+        "skills",
+        "requirement",
+        "requirements",
+        "fundamentals",
+        "experience",
+        "education",
+    },
+    "responsibility": {
+        "duties",
+        "tasks",
+        "role",
+        "work",
+        "responsibilities",
+        "solutions",
+        "develop",
+        "build",
+    },
+    "responsibilities": {
+        "duties",
+        "tasks",
+        "role",
+        "work",
+        "responsibility",
+        "solutions",
+        "develop",
+        "build",
+    },
+    "salary": {
+        "compensation",
+        "pay",
+        "rate",
+        "wage",
+        "wages",
+        "stipend",
+        "remuneration",
+        "benefits",
+    },
     "leave": {"vacation", "pto", "holiday", "holidays", "absence", "time off"},
     "vacation": {"leave", "pto", "holiday", "holidays", "absence", "time off"},
     "benefit": {"perk", "perks", "insurance", "401k", "pension", "health", "dental"},
     "benefits": {"perk", "perks", "insurance", "401k", "pension", "health", "dental"},
 }
 
-_SENTENCE_SPLIT_REGEX = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"\'\(\[])")
+_SENTENCE_SPLIT_REGEX = re.compile(
+    r"(?<!\b\d)(?<!\b[A-Za-z])(?<=[.!?])\s+(?=[A-Z0-9\"\'\(\[])"
+)
 _WORD_REGEX = re.compile(r"\b[a-zA-Z0-9_\-\$]+\b")
+_FORMULA_MARKER_REGEX = re.compile(r"(?:[=≡≤≥×÷±∑∏<>]|\b(?:mod|gcd)\b)", re.IGNORECASE)
 
 
 class SentencePruner:
@@ -88,6 +298,25 @@ class SentencePruner:
         words = _WORD_REGEX.findall(text.lower())
         return {w for w in words if w not in _STOP_WORDS and len(w) > 1}
 
+    @staticmethod
+    def _is_formula_sentence(sentence: str) -> bool:
+        """Identify standalone mathematical expressions that have few natural-language terms."""
+        return bool(_FORMULA_MARKER_REGEX.search(sentence))
+
+    @staticmethod
+    def _is_list_or_schedule_item(sentence: str) -> bool:
+        """Identify bullet points, numbered items, module schedule lines, and table rows."""
+        s = sentence.strip()
+        if not s:
+            return False
+        if s.startswith(("•", "-", "*", ">")):
+            return True
+        if re.match(r"^(\d+[\.\)]|\(\d+\))\s+", s):
+            return True
+        if re.search(r"\b(?:Admin|Dev|SME|Module|Superbadge|Project|Demo Link)\b$", s):
+            return True
+        return False
+
     def compute_salience(self, query_terms: set[str], sentence: str) -> float:
         """Compute the informational salience score of a sentence relative to the query.
 
@@ -109,9 +338,13 @@ class SentencePruner:
         if not shared_terms:
             for qt in query_terms:
                 stem = qt.rstrip("s").rstrip("es")
-                syns = _SEMANTIC_SYNONYMS.get(qt, set()) | _SEMANTIC_SYNONYMS.get(stem, set())
+                syns = _SEMANTIC_SYNONYMS.get(qt, set()) | _SEMANTIC_SYNONYMS.get(
+                    stem, set()
+                )
                 matched_syns = syns.intersection(sentence_terms)
-                if matched_syns or any(st.startswith(stem) for st in sentence_terms if len(stem) >= 4):
+                if matched_syns or any(
+                    st.startswith(stem) for st in sentence_terms if len(stem) >= 4
+                ):
                     shared_terms.add(qt)
 
         term_overlap = len(shared_terms) / max(len(query_terms), 1)
@@ -164,8 +397,35 @@ class SentencePruner:
             score = self.compute_salience(query_terms, s)
             scored_sentences.append((s, score))
 
-        # Filter sentences by salience threshold
-        kept: list[str] = [s for s, score in scored_sentences if score >= threshold]
+        # Preserve equations and structured lists/schedules when other evidence in this chunk is query-relevant.
+        has_relevant_context = any(
+            score >= threshold and not self._is_formula_sentence(sentence)
+            for sentence, score in scored_sentences
+        )
+        has_schedule_context = any(
+            bool(
+                re.search(
+                    r"\b(?:schedule|modules?|curriculum|topics?|agenda|syllabus)\b",
+                    sentence,
+                    re.IGNORECASE,
+                )
+            )
+            and score >= threshold
+            for sentence, score in scored_sentences
+        )
+
+        kept: list[str] = [
+            sentence
+            for sentence, score in scored_sentences
+            if score >= threshold
+            or (has_relevant_context and self._is_formula_sentence(sentence))
+            or (has_schedule_context and self._is_list_or_schedule_item(sentence))
+            or (
+                has_relevant_context
+                and self._is_list_or_schedule_item(sentence)
+                and len(sentence.split()) <= 15
+            )
+        ]
 
         # Fallback preservation: If no sentence met threshold
         if not kept:

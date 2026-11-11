@@ -93,6 +93,14 @@ class TestContextDeduplicator:
         set_c = {"completely", "different", "words"}
         assert ContextDeduplicator.jaccard_similarity(set_a, set_c) == 0.0
 
+    def test_strip_seam_overlap_helper(self):
+        dedup = ContextDeduplicator()
+        prev_chunk = "Employees receive 20 days vacation. Requests must be submitted two weeks in advance."
+        curr_chunk = "Requests must be submitted two weeks in advance. Unused days roll over into next year."
+        stripped = dedup.strip_seam_overlap(prev_chunk, curr_chunk)
+        assert "Unused days roll over" in stripped
+        assert "two weeks in advance" not in stripped
+
 
 class TestLostInTheMiddleReorderer:
     """Tests U-shaped attention distribution positioning."""
@@ -165,14 +173,53 @@ class TestTokenBudgetManager:
             },
         ]
 
-        context, accepted, total_tokens = mgr.fit_within_budget(candidates, max_budget=60)
+        context, accepted, total_tokens = mgr.fit_within_budget(
+            candidates, max_budget=60
+        )
         assert total_tokens <= 60
         assert len(accepted) < len(candidates)
         assert "[Doc 1, Chunk 1]" in context
 
+    def test_adaptive_budget_by_intent(self):
+        mgr = TokenBudgetManager()
+        assert mgr.get_adaptive_budget("FACTUAL", max_budget=4000) == 700
+        assert mgr.get_adaptive_budget("COMPARISON", max_budget=4000) == 2000
+        assert mgr.get_adaptive_budget("SUMMARY", max_budget=4000) == 3500
+        assert mgr.get_adaptive_budget(None, max_budget=4000) == 4000
+
 
 class TestContextCompactorIntegration:
     """Tests master coordinator integrating pruning, deduplication, U-shaped reordering, and budgeting."""
+
+    def test_query_relevant_math_survives_into_final_prompt_context(self):
+        chunk = RerankedChunk(
+            chunk_id="rsa_chunk",
+            content=(
+                "RSA public and private keys use prime numbers p and q.\n"
+                "n = p * q\n"
+                "The RSA encryption formula uses plaintext m and public exponent e.\n"
+                "c = m^e mod n\n"
+                "The RSA decryption formula uses private exponent d.\n"
+                "m = c^d mod n\n"
+                "Office air conditioning operates daily."
+            ),
+            document_id="doc_rsa",
+            chunk_index=0,
+            metadata={"source": "rsa_notes.pdf", "page": 1},
+            rerank_score=0.95,
+            raw_score=5.0,
+            rerank_position=1,
+        )
+
+        result = ContextCompactor().compact(
+            query="RSA encryption and decryption formulas",
+            chunks=[chunk],
+        )
+
+        assert "n = p * q" in result.formatted_prompt_context
+        assert "c = m^e mod n" in result.formatted_prompt_context
+        assert "m = c^d mod n" in result.formatted_prompt_context
+        assert "air conditioning" not in result.formatted_prompt_context
 
     @pytest.fixture
     def sample_reranked_chunks(self) -> list[RerankedChunk]:
@@ -182,7 +229,11 @@ class TestContextCompactorIntegration:
                 content="Full-time employees receive 20 days of paid vacation annually. Office chairs are ergonomically designed.",
                 document_id="doc_leave",
                 chunk_index=0,
-                metadata={"source": "leave_policy.pdf", "page": 1, "section": "Vacation"},
+                metadata={
+                    "source": "leave_policy.pdf",
+                    "page": 1,
+                    "section": "Vacation",
+                },
                 rerank_score=0.92,
                 raw_score=4.2,
                 rerank_position=1,
@@ -192,7 +243,11 @@ class TestContextCompactorIntegration:
                 content="Vacation time accrues on a monthly basis starting from day one. Office chairs are ergonomically designed.",
                 document_id="doc_leave",
                 chunk_index=1,
-                metadata={"source": "leave_policy.pdf", "page": 1, "section": "Vacation"},
+                metadata={
+                    "source": "leave_policy.pdf",
+                    "page": 1,
+                    "section": "Vacation",
+                },
                 rerank_score=0.85,
                 raw_score=3.1,
                 rerank_position=2,
@@ -202,7 +257,11 @@ class TestContextCompactorIntegration:
                 content="Sick leave provides up to 10 days of paid medical leave per calendar year.",
                 document_id="doc_sick",
                 chunk_index=0,
-                metadata={"source": "sick_policy.pdf", "page": 2, "section": "Sick Leave"},
+                metadata={
+                    "source": "sick_policy.pdf",
+                    "page": 2,
+                    "section": "Sick Leave",
+                },
                 rerank_score=0.70,
                 raw_score=1.8,
                 rerank_position=3,
@@ -274,9 +333,15 @@ class TestFullContextPipelineWithIndexes:
         from src.retrieval.hybrid import HybridRetriever
 
         hybrid = HybridRetriever(index_manager=manager)
-        retrieval_res = hybrid.retrieve(query="How much vacation leave do staff receive?")
-        ranked_context = default_reranker.rerank_retrieval_response(retrieval_res, top_n=3)
-        optimized_context = default_context_compactor.compact_ranked_context(ranked_context)
+        retrieval_res = hybrid.retrieve(
+            query="How much vacation leave do staff receive?"
+        )
+        ranked_context = default_reranker.rerank_retrieval_response(
+            retrieval_res, top_n=3
+        )
+        optimized_context = default_context_compactor.compact_ranked_context(
+            ranked_context
+        )
 
         assert isinstance(optimized_context, OptimizedContext)
         assert len(optimized_context.evidence_items) >= 1
@@ -319,4 +384,4 @@ class TestContextAPI:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ready"
-        assert data["default_token_budget"] == 1500
+        assert data["default_token_budget"] == 4000

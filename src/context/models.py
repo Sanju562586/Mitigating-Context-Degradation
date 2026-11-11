@@ -54,10 +54,14 @@ class CompactionRequest(BaseModel):
         description="Top-ranked high-confidence chunks from Module 4 cross-encoder reranking.",
     )
     max_token_budget: int = Field(
-        default=1500,
+        default=4000,
         ge=100,
-        le=8000,
+        le=16000,
         description="Target maximum token allowance for the compacted prompt context.",
+    )
+    intent: str | None = Field(
+        default=None,
+        description="Optional detected query intent for adaptive budget sizing (e.g. FACTUAL, COMPARISON, SUMMARY).",
     )
     enable_sentence_pruning: bool = Field(
         default=True,

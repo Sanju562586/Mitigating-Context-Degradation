@@ -154,7 +154,9 @@ def test_session_permissions_governance(memory_components):
     assert perms.write_enabled is True
 
     # Disable write permission
-    new_perms = MemoryPermissions(read_enabled=True, write_enabled=False, auto_summarize=False)
+    new_perms = MemoryPermissions(
+        read_enabled=True, write_enabled=False, auto_summarize=False
+    )
     registry.set_permissions(session.session_id, new_perms)
 
     saved_perms = registry.get_permissions(session.session_id)
@@ -201,6 +203,7 @@ def test_store_memory_item_and_search(memory_components):
         query="vacation leave allowance",
         session_id=session.session_id,
         top_k=2,
+        min_similarity=0.0,
     )
     assert len(matches) > 0
     assert matches[0].memory_id == "mem_vacation"
@@ -415,7 +418,7 @@ def test_api_session_crud():
     # Create session
     create_resp = client.post(
         "/api/memory/sessions",
-        json={"title": "API Test Session", "user_id": "test_user"},
+        json={"title": "API Test Session"},
     )
     assert create_resp.status_code == 201
     created_data = create_resp.json()
@@ -423,7 +426,7 @@ def test_api_session_crud():
     assert created_data["title"] == "API Test Session"
 
     # List sessions
-    list_resp = client.get("/api/memory/sessions?user_id=test_user")
+    list_resp = client.get("/api/memory/sessions")
     assert list_resp.status_code == 200
     assert any(s["session_id"] == session_id for s in list_resp.json())
 
@@ -517,7 +520,9 @@ def test_api_export_markdown_and_clear():
     )
 
     # Export markdown
-    export_resp = client.get(f"/api/memory/sessions/{session_id}/export?format=markdown")
+    export_resp = client.get(
+        f"/api/memory/sessions/{session_id}/export?format=markdown"
+    )
     assert export_resp.status_code == 200
     assert "# Session Memory Export" in export_resp.text
     assert "What is Python?" in export_resp.text
