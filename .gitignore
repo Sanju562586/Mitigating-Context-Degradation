@@ -40,6 +40,7 @@ Thumbs.db
 data/raw/
 data/processed/
 data/documents/
+data/open_ragbench/
 
 # Models and vector indexes
 models/
