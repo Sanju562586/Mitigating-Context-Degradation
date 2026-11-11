@@ -77,8 +77,7 @@ class CrossSessionMemorySynchronizer:
         # Retrieve top relevant memories
         memories, scores = self.store.search_memories(
             query=query,
-            session_id=None,  # Cross-session retrieval enabled across user's history
-            user_id=user_id,
+            session_id=None,  # Cross-session retrieval across the shared workspace
             top_k=perms.max_injected_memories,
             min_similarity=0.25,
         )
@@ -87,7 +86,6 @@ class CrossSessionMemorySynchronizer:
         summaries, _ = self.store.search_summaries(
             query=query,
             session_id=session_id,
-            user_id=user_id,
             top_k=1,
             min_similarity=0.25,
         )
@@ -242,7 +240,7 @@ class CrossSessionMemorySynchronizer:
         session_id = request.session_id
         if not session_id:
             session = self.registry.get_or_create_default_session(
-                user_id=request.user_id
+                user_id="default_user"
             )
             session_id = session.session_id
 
@@ -259,7 +257,7 @@ class CrossSessionMemorySynchronizer:
         item = EpisodicMemoryItem(
             memory_id=memory_id,
             session_id=session_id,
-            user_id=request.user_id,
+            user_id="default_user",
             turn_index=0,
             query=query,
             intent="WEB_CONTEXT",

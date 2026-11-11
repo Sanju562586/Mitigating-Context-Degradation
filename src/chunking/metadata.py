@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -153,6 +154,7 @@ class MetadataTagger:
         page: int | None,
         section: str | None,
         sequence_num: int,
+        document_id: str | None = None,
     ) -> str:
         """Generate a clean semantic chunk ID adhering to the format: {slug}_{page}_{seq:03d}.
 
@@ -160,7 +162,13 @@ class MetadataTagger:
         """
         slug = cls.extract_source_slug(source_name)
         page_part = str(page) if page is not None else "0"
-        return f"{slug}_{page_part}_{sequence_num:03d}"
+        chunk_id = f"{slug}_{page_part}_{sequence_num:03d}"
+        if document_id:
+            document_suffix = hashlib.sha256(
+                document_id.encode("utf-8")
+            ).hexdigest()[:16]
+            chunk_id = f"{chunk_id}_{document_suffix}"
+        return chunk_id
 
     @classmethod
     def build_chunk_metadata(
@@ -174,6 +182,7 @@ class MetadataTagger:
         token_count: int,
         overlap_token_count: int = 0,
         extra: dict[str, Any] | None = None,
+        document_id: str | None = None,
     ) -> dict[str, Any]:
         """Construct the standardized metadata payload for a chunk.
 
@@ -187,7 +196,9 @@ class MetadataTagger:
           "created_at": "2026-09-19"
         }
         """
-        chunk_id = cls.generate_chunk_id(source_name, page, section, sequence_num)
+        chunk_id = cls.generate_chunk_id(
+            source_name, page, section, sequence_num, document_id=document_id
+        )
         created_at_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
         meta: dict[str, Any] = {

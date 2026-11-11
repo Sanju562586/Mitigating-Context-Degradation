@@ -262,6 +262,9 @@ _SEMANTIC_SYNONYMS: dict[str, set[str]] = {
 
 _SENTENCE_SPLIT_REGEX = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"\'\(\[])")
 _WORD_REGEX = re.compile(r"\b[a-zA-Z0-9_\-\$]+\b")
+_FORMULA_MARKER_REGEX = re.compile(
+    r"(?:[=≡≤≥×÷±∑∏<>]|\b(?:mod|gcd)\b)", re.IGNORECASE
+)
 
 
 class SentencePruner:
@@ -294,6 +297,11 @@ class SentencePruner:
         """Extract lowercase content terms excluding stop words."""
         words = _WORD_REGEX.findall(text.lower())
         return {w for w in words if w not in _STOP_WORDS and len(w) > 1}
+
+    @staticmethod
+    def _is_formula_sentence(sentence: str) -> bool:
+        """Identify standalone mathematical expressions that have few natural-language terms."""
+        return bool(_FORMULA_MARKER_REGEX.search(sentence))
 
     def compute_salience(self, query_terms: set[str], sentence: str) -> float:
         """Compute the informational salience score of a sentence relative to the query.
@@ -375,8 +383,17 @@ class SentencePruner:
             score = self.compute_salience(query_terms, s)
             scored_sentences.append((s, score))
 
-        # Filter sentences by salience threshold
-        kept: list[str] = [s for s, score in scored_sentences if score >= threshold]
+        # Preserve equations only when other evidence in this chunk is query-relevant.
+        has_relevant_context = any(
+            score >= threshold and not self._is_formula_sentence(sentence)
+            for sentence, score in scored_sentences
+        )
+        kept: list[str] = [
+            sentence
+            for sentence, score in scored_sentences
+            if score >= threshold
+            or (has_relevant_context and self._is_formula_sentence(sentence))
+        ]
 
         # Fallback preservation: If no sentence met threshold
         if not kept:

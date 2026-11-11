@@ -64,15 +64,10 @@ class SemanticChunker:
             if not text:
                 continue
 
-            # Track page numbers and section titles
-            if el.page_number is not None:
-                current_pages.add(el.page_number)
-            if el.section_title:
-                current_sections.add(el.section_title)
-                current_section_title = el.section_title
-            elif el.element_type == "heading":
-                current_section_title = text.lstrip("#").strip()
-                current_sections.add(current_section_title)
+            el_page = el.page_number
+            el_section = el.section_title
+            if not el_section and el.element_type == "heading":
+                el_section = text.lstrip("#").strip()
 
             el_tokens = count_tokens(text)
 
@@ -112,13 +107,20 @@ class SemanticChunker:
                             else [sentence]
                         )
                         current_token_count = count_tokens("\n\n".join(current_texts))
-                        current_pages = (
-                            {el.page_number} if el.page_number is not None else set()
+                        current_pages = {el_page} if el_page is not None else set()
+                        current_sections = {el_section} if el_section else (
+                            {current_section_title} if current_section_title else set()
                         )
-                        current_sections = {current_section_title}
+                        if el_section:
+                            current_section_title = el_section
                     else:
                         current_texts.append(sentence)
                         current_token_count += s_tokens
+                        if el_page is not None:
+                            current_pages.add(el_page)
+                        if el_section:
+                            current_sections.add(el_section)
+                            current_section_title = el_section
                 continue
 
             # Check if adding this element breaches target size
@@ -148,13 +150,20 @@ class SemanticChunker:
                     [previous_overlap_text, text] if previous_overlap_text else [text]
                 )
                 current_token_count = count_tokens("\n\n".join(current_texts))
-                current_pages = (
-                    {el.page_number} if el.page_number is not None else set()
+                current_pages = {el_page} if el_page is not None else set()
+                current_sections = {el_section} if el_section else (
+                    {current_section_title} if current_section_title else set()
                 )
-                current_sections = {current_section_title}
+                if el_section:
+                    current_section_title = el_section
             else:
                 current_texts.append(text)
                 current_token_count += el_tokens
+                if el_page is not None:
+                    current_pages.add(el_page)
+                if el_section:
+                    current_sections.add(el_section)
+                    current_section_title = el_section
 
         # Flush final remaining accumulator
         if current_texts:
@@ -206,6 +215,7 @@ class SemanticChunker:
             token_count=tokens,
             overlap_token_count=overlap_tokens_count,
             extra=extra_metadata,
+            document_id=doc_id,
         )
 
         return DocumentChunk(
@@ -236,15 +246,27 @@ class SemanticChunker:
             explicit_type=document_type,
         )
 
+        # Break any oversized paragraphs into sentences to ensure target_tokens is respected
+        units: list[str] = []
+        for p in paragraphs:
+            if count_tokens(p) > self.target_tokens:
+                sub_sentences = self._split_into_sentences(p)
+                if sub_sentences:
+                    units.extend(sub_sentences)
+                else:
+                    units.append(p)
+            else:
+                units.append(p)
+
         chunks: list[DocumentChunk] = []
         current_texts: list[str] = []
         current_tokens = 0
         seq_num = 1
         previous_overlap = ""
 
-        for p in paragraphs:
-            p_tokens = count_tokens(p)
-            if current_tokens > 0 and (current_tokens + p_tokens > self.target_tokens):
+        for unit in units:
+            unit_tokens = count_tokens(unit)
+            if current_tokens > 0 and (current_tokens + unit_tokens > self.target_tokens):
                 content = "\n\n".join(current_texts).strip()
                 tokens = count_tokens(content)
                 meta = MetadataTagger.build_chunk_metadata(
@@ -257,6 +279,7 @@ class SemanticChunker:
                     token_count=tokens,
                     overlap_token_count=count_tokens(previous_overlap),
                     extra=extra_metadata,
+                    document_id=doc_id,
                 )
                 chunk = DocumentChunk(
                     id=meta["chunk_id"],
@@ -273,11 +296,11 @@ class SemanticChunker:
                 previous_overlap = get_trailing_token_overlap(
                     content, self.overlap_tokens
                 )
-                current_texts = [previous_overlap, p] if previous_overlap else [p]
+                current_texts = [previous_overlap, unit] if previous_overlap else [unit]
                 current_tokens = count_tokens("\n\n".join(current_texts))
             else:
-                current_texts.append(p)
-                current_tokens += p_tokens
+                current_texts.append(unit)
+                current_tokens += unit_tokens
 
         if current_texts:
             content = "\n\n".join(current_texts).strip()
@@ -292,6 +315,7 @@ class SemanticChunker:
                 token_count=tokens,
                 overlap_token_count=count_tokens(previous_overlap),
                 extra=extra_metadata,
+                document_id=doc_id,
             )
             chunk = DocumentChunk(
                 id=meta["chunk_id"],

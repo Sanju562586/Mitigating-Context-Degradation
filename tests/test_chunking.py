@@ -76,6 +76,32 @@ class TestMetadataTagger:
             == "GENERAL_DOC"
         )
 
+    def test_document_chunks_have_distinct_ids_for_same_source_page_and_sequence(self):
+        documents = [
+            Document.create(
+                source_name="employee_handbook.pdf",
+                file_type=DocumentType.PDF,
+                elements=[
+                    DocumentElement(
+                        id="el_0",
+                        element_type="paragraph",
+                        content=content,
+                        section_title="Leave Policy",
+                        page_number=12,
+                    )
+                ],
+            )
+            for content in (
+                "Employees receive 20 days of annual vacation leave.",
+                "Employees receive 25 days of annual vacation leave.",
+            )
+        ]
+
+        chunk_ids = [document.chunks[0].id for document in documents]
+        assert chunk_ids[0].startswith("handbook_12_001_")
+        assert chunk_ids[1].startswith("handbook_12_001_")
+        assert chunk_ids[0] != chunk_ids[1]
+
 
 class TestSemanticChunker:
     def test_semantic_chunking_with_50_tokens_overlap(self):
@@ -186,3 +212,48 @@ class TestSemanticChunker:
         assert first_chunk.metadata["document_type"] == "RESEARCH_PAPER"
         assert first_chunk.metadata["source"] == "paper.pdf"
         assert "paper_" in first_chunk.metadata["chunk_id"]
+
+    def test_element_chunker_semantic_compatibility(self):
+        """Verify ElementChunker in src.ingestion uses semantic chunking with boundary awareness."""
+        from src.ingestion.chunker import ElementChunker
+
+        chunker = ElementChunker(target_tokens=60, overlap_tokens=20)
+        elements = [
+            DocumentElement(
+                id="el_0",
+                element_type="paragraph",
+                content="Sentence one regarding architecture design. Sentence two regarding retrieval.",
+                section_title="Architecture",
+                page_number=1,
+            ),
+            DocumentElement(
+                id="el_1",
+                element_type="paragraph",
+                content="Sentence three on indexing. Sentence four on vector databases and search.",
+                section_title="Indexing",
+                page_number=2,
+            ),
+        ]
+        chunks = chunker.chunk_elements("doc_test", elements, source_name="system_spec.txt")
+        assert len(chunks) >= 1
+        assert chunks[0].document_id == "doc_test"
+        assert "chunk_id" in chunks[0].metadata
+
+    def test_chunk_plain_text_oversized_paragraph(self):
+        """Verify fallback plain text chunking decomposes long paragraphs exceeding target_tokens."""
+        chunker = SemanticChunker(target_tokens=50, overlap_tokens=15)
+        # 1 long paragraph without double newlines
+        long_paragraph = (
+            "First sentence explains the hybrid retrieval architecture. "
+            "Second sentence details cross-encoder reranking and candidate scoring. "
+            "Third sentence covers extractive context compaction and boundary deduplication. "
+            "Fourth sentence analyzes evidence sufficiency gating and truthful abstention. "
+            "Fifth sentence verifies factual claims with sentence-level NLI guardrails. "
+            "Sixth sentence evaluates memory synchronization across cross-session interactions."
+        )
+        chunks = chunker.chunk_elements("doc_long", [], raw_text=long_paragraph, source_name="overview.txt")
+        assert len(chunks) > 1, "Expected oversized paragraph to be split into multiple chunks"
+        for chunk in chunks:
+            assert count_tokens(chunk.content) <= 80  # Well bounded near target + overlap
+        assert chunks[0].metadata["next_chunk_id"] == chunks[1].id
+        assert chunks[1].metadata["prev_chunk_id"] == chunks[0].id

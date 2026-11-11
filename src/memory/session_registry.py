@@ -153,7 +153,6 @@ class SessionRegistry:
         md_lines = [
             f"# Session Memory Export: {session.title}",
             f"- **Session ID:** `{session.session_id}`",
-            f"- **User:** `{session.user_id}`",
             f"- **Created:** {session.created_at}",
             f"- **Total Turns:** {session.turn_count}",
             f"- **Active Documents:** {', '.join(session.active_document_ids) if session.active_document_ids else 'None'}",

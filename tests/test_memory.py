@@ -417,7 +417,7 @@ def test_api_session_crud():
     # Create session
     create_resp = client.post(
         "/api/memory/sessions",
-        json={"title": "API Test Session", "user_id": "test_user"},
+        json={"title": "API Test Session"},
     )
     assert create_resp.status_code == 201
     created_data = create_resp.json()
@@ -425,7 +425,7 @@ def test_api_session_crud():
     assert created_data["title"] == "API Test Session"
 
     # List sessions
-    list_resp = client.get("/api/memory/sessions?user_id=test_user")
+    list_resp = client.get("/api/memory/sessions")
     assert list_resp.status_code == 200
     assert any(s["session_id"] == session_id for s in list_resp.json())
 

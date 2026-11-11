@@ -159,10 +159,6 @@ class MemorySearchQuery(BaseModel):
         default=None,
         description="Optional session ID to constrain search to a single session.",
     )
-    user_id: str | None = Field(
-        default="default_user",
-        description="User profile identifier.",
-    )
     top_k: int = Field(
         default=3,
         ge=1,
@@ -243,7 +239,6 @@ class WebContextCaptureRequest(BaseModel):
         default=None,
         description="Target session ID to store the captured web context into.",
     )
-    user_id: str = Field(default="default_user", description="User profile identifier.")
     tags: list[str] = Field(
         default_factory=lambda: ["web_capture"],
         description="Categorical tags for indexing.",

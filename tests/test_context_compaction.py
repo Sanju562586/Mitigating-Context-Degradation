@@ -176,6 +176,36 @@ class TestTokenBudgetManager:
 class TestContextCompactorIntegration:
     """Tests master coordinator integrating pruning, deduplication, U-shaped reordering, and budgeting."""
 
+    def test_query_relevant_math_survives_into_final_prompt_context(self):
+        chunk = RerankedChunk(
+            chunk_id="rsa_chunk",
+            content=(
+                "RSA public and private keys use prime numbers p and q.\n"
+                "n = p * q\n"
+                "The RSA encryption formula uses plaintext m and public exponent e.\n"
+                "c = m^e mod n\n"
+                "The RSA decryption formula uses private exponent d.\n"
+                "m = c^d mod n\n"
+                "Office air conditioning operates daily."
+            ),
+            document_id="doc_rsa",
+            chunk_index=0,
+            metadata={"source": "rsa_notes.pdf", "page": 1},
+            rerank_score=0.95,
+            raw_score=5.0,
+            rerank_position=1,
+        )
+
+        result = ContextCompactor().compact(
+            query="RSA encryption and decryption formulas",
+            chunks=[chunk],
+        )
+
+        assert "n = p * q" in result.formatted_prompt_context
+        assert "c = m^e mod n" in result.formatted_prompt_context
+        assert "m = c^d mod n" in result.formatted_prompt_context
+        assert "air conditioning" not in result.formatted_prompt_context
+
     @pytest.fixture
     def sample_reranked_chunks(self) -> list[RerankedChunk]:
         return [

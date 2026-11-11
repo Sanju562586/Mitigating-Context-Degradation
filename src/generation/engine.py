@@ -91,19 +91,31 @@ class OfflineGroundedEngine(BaseInferenceEngine):
                         passages.append((cur_tag, "\n".join(cur_buf).strip()))
                         cur_buf = []
                     cur_tag = tag_match.group(1)
-                elif "USER QUERY:" in line:
+                elif "USER QUERY:" in line or "Question:" in line:
                     break
                 else:
                     cur_buf.append(line)
             if cur_buf:
                 passages.append((cur_tag, "\n".join(cur_buf).strip()))
 
+        if not passages:
+            # Fallback for unbracketed conventional context blocks (e.g. Context:\n...\n\nQuestion:)
+            context_match = re.search(
+                r"(?:Context:\s*\n|---\s*CONTEXT\s*---\s*\n)(.*?)(?=\n\nQuestion:|\n\nUSER QUERY:|$)",
+                prompt,
+                re.DOTALL | re.IGNORECASE,
+            )
+            if context_match and context_match.group(1).strip():
+                passages.append(("[Doc 1, Chunk 0]", context_match.group(1).strip()))
+
         return passages
 
     def _extract_query(self, prompt: str) -> str:
         """Extract the query string from the prompt."""
         m = re.search(
-            r"USER QUERY:\s*\n(.*?)(?=\n\nGROUNDED ANSWER|$)", prompt, re.DOTALL
+            r"(?:USER QUERY:|Question:)\s*\n?(.*?)(?=\n\nGROUNDED ANSWER|\nAnswer:|$)",
+            prompt,
+            re.DOTALL | re.IGNORECASE,
         )
         return m.group(1).strip() if m else ""
 
@@ -164,11 +176,15 @@ class OfflineGroundedEngine(BaseInferenceEngine):
         if not top_sentences:
             return "The retrieved context does not contain sufficient details to address the query."
 
+        is_plain_prompt = bool(re.search(r"Question:.*?\nAnswer:", prompt, re.IGNORECASE))
         # Format answer statements with citation tags
         answer_parts = []
         for _, sent, tag in top_sentences:
             sent_trimmed = sent.rstrip(". ")
-            answer_parts.append(f"{sent_trimmed} {tag}.")
+            if is_plain_prompt:
+                answer_parts.append(f"{sent_trimmed}.")
+            else:
+                answer_parts.append(f"{sent_trimmed} {tag}.")
 
         return " ".join(answer_parts)
 
