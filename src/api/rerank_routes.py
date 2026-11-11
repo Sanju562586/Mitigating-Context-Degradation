@@ -28,21 +28,21 @@ class HybridAndRerankRequest(BaseModel):
         description="Optional structured metadata filters.",
     )
     top_k_fused: int = Field(
-        default=20,
+        default=50,
         ge=1,
-        le=50,
+        le=100,
         description="Candidate pool size to retrieve from Module 3 hybrid fusion before reranking.",
     )
     threshold: float = Field(
-        default=0.35,
+        default=0.15,
         ge=0.0,
         le=1.0,
-        description="Hard cutoff relevance threshold tau for candidate pruning.",
+        description="Relevance cutoff threshold tau for candidate pruning.",
     )
     top_n: int = Field(
-        default=5,
+        default=20,
         ge=1,
-        le=20,
+        le=50,
         description="Maximum number of top-precision chunks to retain for the prompt context.",
     )
 

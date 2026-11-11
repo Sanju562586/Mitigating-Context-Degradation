@@ -266,6 +266,31 @@ class TestHybridRetrieverIntegration:
         )
         assert response.processed_query.intent == QueryIntent.COMPARISON
         assert response.processed_query.filters.get("year") == 2024
+        assert len(response.candidates) > 0
+
+    def test_adaptive_filter_relaxation_on_zero_results(
+        self, test_manager: IndexManager
+    ):
+        """Verify that when an extracted filter produces 0 results, the retriever relaxes the filter."""
+        retriever = HybridRetriever(index_manager=test_manager)
+
+        # Year 2099 does not exist in any index, but vacation leave content does
+        response = retriever.retrieve(
+            "What is the vacation leave allowance in the 2099 handbook?"
+        )
+        assert response.processed_query.filters.get("year") == 2099
+        # Adaptive relaxation should have triggered and returned the vacation leave chunk
+        assert len(response.candidates) > 0
+        assert any("vacation" in c.content.lower() for c in response.candidates)
+
+    def test_empty_query_short_circuit(self, test_manager: IndexManager):
+        """Verify that empty or whitespace queries short-circuit safely."""
+        retriever = HybridRetriever(index_manager=test_manager)
+        response = retriever.retrieve("   ")
+        assert len(response.candidates) == 0
+        assert response.total_candidates == 0
+        assert response.dense_count == 0
+        assert response.sparse_count == 0
 
 
 class TestHybridRetrievalAPI:

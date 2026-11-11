@@ -369,4 +369,4 @@ class TestContextAPI:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ready"
-        assert data["default_token_budget"] == 1500
+        assert data["default_token_budget"] == 4000

@@ -169,9 +169,7 @@ def get_session_details(session_id: str) -> SessionDetailsResponse:
 def update_session(session_id: str, payload: UpdateSessionRequest) -> Session:
     """Update mutable attributes of a session."""
     if payload.active_document_ids is not None:
-        payload.active_document_ids = _validate_documents(
-            payload.active_document_ids
-        )
+        payload.active_document_ids = _validate_documents(payload.active_document_ids)
     updated = default_session_registry.update_session(
         session_id=session_id,
         title=payload.title,

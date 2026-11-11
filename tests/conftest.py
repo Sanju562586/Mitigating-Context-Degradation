@@ -1,5 +1,10 @@
 """Shared test configuration and offline environment for test suites."""
 
+try:
+    import faiss  # noqa: F401 - Must be imported before torch on Windows to avoid OpenMP DLL collision
+except Exception:
+    pass
+
 import hashlib
 import os
 import re
@@ -87,9 +92,12 @@ class _OfflineSentenceTransformer:
         vectors = np.zeros((len(texts), EMBEDDING_DIMENSION), dtype=np.float32)
         for row, text in enumerate(texts):
             for token in _tokens(text):
-                feature = int.from_bytes(
-                    hashlib.sha256(token.encode("utf-8")).digest()[:4], "big"
-                ) % EMBEDDING_DIMENSION
+                feature = (
+                    int.from_bytes(
+                        hashlib.sha256(token.encode("utf-8")).digest()[:4], "big"
+                    )
+                    % EMBEDDING_DIMENSION
+                )
                 vectors[row, feature] += 1.0
         return vectors
 
@@ -109,12 +117,32 @@ class _OfflineCrossEncoder:
         return np.asarray(scores, dtype=np.float32)
 
 
+try:
+    import sentence_transformers
+
+    sentence_transformers.SentenceTransformer = _OfflineSentenceTransformer
+    sentence_transformers.CrossEncoder = _OfflineCrossEncoder
+except Exception:
+    pass
+
+
 @pytest.fixture(autouse=True)
 def use_offline_transformer_models(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep unit and integration tests independent of model downloads and Hub access."""
     import sentence_transformers
 
     from src.indexing import embeddings
+    from src.reranking import engine
 
     monkeypatch.setattr(embeddings, "SentenceTransformer", _OfflineSentenceTransformer)
     monkeypatch.setattr(sentence_transformers, "CrossEncoder", _OfflineCrossEncoder)
+    monkeypatch.setattr(
+        embeddings.default_embedding_engine,
+        "_model",
+        _OfflineSentenceTransformer("all-MiniLM-L6-v2"),
+    )
+    monkeypatch.setattr(
+        engine.default_cross_encoder_engine,
+        "_model",
+        _OfflineCrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2"),
+    )

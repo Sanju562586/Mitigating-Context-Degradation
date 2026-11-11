@@ -332,7 +332,8 @@ def _evaluate(
                     extreme = 0
                     for _ in range(5000):
                         permuted = statistics.mean(
-                            value if rng.random() < 0.5 else -value for value in differences
+                            value if rng.random() < 0.5 else -value
+                            for value in differences
                         )
                         extreme += abs(permuted) >= abs(observed)
                     paired.append(

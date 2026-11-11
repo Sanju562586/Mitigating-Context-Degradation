@@ -234,7 +234,9 @@ class TestSemanticChunker:
                 page_number=2,
             ),
         ]
-        chunks = chunker.chunk_elements("doc_test", elements, source_name="system_spec.txt")
+        chunks = chunker.chunk_elements(
+            "doc_test", elements, source_name="system_spec.txt"
+        )
         assert len(chunks) >= 1
         assert chunks[0].document_id == "doc_test"
         assert "chunk_id" in chunks[0].metadata
@@ -251,9 +253,85 @@ class TestSemanticChunker:
             "Fifth sentence verifies factual claims with sentence-level NLI guardrails. "
             "Sixth sentence evaluates memory synchronization across cross-session interactions."
         )
-        chunks = chunker.chunk_elements("doc_long", [], raw_text=long_paragraph, source_name="overview.txt")
-        assert len(chunks) > 1, "Expected oversized paragraph to be split into multiple chunks"
+        chunks = chunker.chunk_elements(
+            "doc_long", [], raw_text=long_paragraph, source_name="overview.txt"
+        )
+        assert len(chunks) > 1, (
+            "Expected oversized paragraph to be split into multiple chunks"
+        )
         for chunk in chunks:
-            assert count_tokens(chunk.content) <= 80  # Well bounded near target + overlap
+            assert (
+                count_tokens(chunk.content) <= 80
+            )  # Well bounded near target + overlap
         assert chunks[0].metadata["next_chunk_id"] == chunks[1].id
         assert chunks[1].metadata["prev_chunk_id"] == chunks[0].id
+
+    def test_semantic_breakpoint_topic_shift(self):
+        """Verify that a sharp topic shift triggers a semantic breakpoint into separate chunks."""
+        chunker = SemanticChunker(
+            target_tokens=300, min_tokens=15, similarity_threshold=0.05
+        )
+        # 2 sentences on vacation leave, followed by 2 sentences on transformer attention architecture
+        elements = [
+            DocumentElement(
+                id="el_0",
+                element_type="paragraph",
+                content=(
+                    "Full-time employees receive 20 days of paid annual vacation leave each calendar year. "
+                    "Vacation requests must be submitted at least two weeks in advance through the HR portal."
+                ),
+            ),
+            DocumentElement(
+                id="el_1",
+                element_type="paragraph",
+                content=(
+                    "The transformer neural network uses multi-head self-attention mechanisms to process sequence data. "
+                    "Positional encodings inject token order information into representation vectors."
+                ),
+            ),
+        ]
+        chunks = chunker.chunk_elements(
+            "doc_shift", elements, source_name="multi_topic.txt"
+        )
+        assert len(chunks) >= 2, (
+            "Expected topic shift to trigger semantic chunk boundary"
+        )
+        assert "vacation" in chunks[0].content.lower()
+        assert "transformer" in chunks[1].content.lower()
+        assert chunks[0].metadata["next_chunk_id"] == chunks[1].id
+        assert chunks[1].metadata["prev_chunk_id"] == chunks[0].id
+
+    def test_protected_abbreviations_and_decimals(self):
+        """Verify sentence splitting protects abbreviations and decimal numbers."""
+        chunker = SemanticChunker()
+        text = "Dr. Smith evaluated e.g. the model with 98.5% precision at 10.5 AM. What were the results? They were excellent."
+        sentences = chunker._split_into_sentences(text)
+        assert len(sentences) == 3
+        assert (
+            "Dr. Smith evaluated e.g. the model with 98.5% precision at 10.5 AM."
+            in sentences[0]
+        )
+        assert "What were the results?" in sentences[1]
+        assert "They were excellent." in sentences[2]
+
+    def test_auto_metadata_tagging_year_and_dept(self):
+        """Verify automatic extraction of year and department during chunking."""
+        chunker = SemanticChunker()
+        elements = [
+            DocumentElement(
+                id="el_0",
+                element_type="paragraph",
+                content="Engineering guidelines for production microservice deployments.",
+                section_title="Deployment Guide",
+            )
+        ]
+        chunks = chunker.chunk_elements(
+            "doc_meta_test",
+            elements,
+            source_name="engineering_deployment_guide_2025.pdf",
+        )
+        assert len(chunks) == 1
+        meta = chunks[0].metadata
+        assert meta["year"] == 2025
+        assert meta["department"] == "engineering"
+        assert meta["section"] == "Deployment Guide"

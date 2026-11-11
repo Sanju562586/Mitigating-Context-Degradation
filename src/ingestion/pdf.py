@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 try:
@@ -11,6 +12,11 @@ except ImportError:
 
 from src.ingestion.base import BaseParser
 from src.ingestion.models import Document, DocumentElement, DocumentType
+
+_HEADING_REGEX = re.compile(
+    r"^(?:Week\s+\d+|SME\s+Intervention\s+\d+|Course\s+Parameters)\b",
+    re.IGNORECASE,
+)
 
 
 class PDFParser(BaseParser):
@@ -83,12 +89,27 @@ class PDFParser(BaseParser):
                     block_text = block[4].strip()
                     if block_text:
                         page_text_parts.append(block_text)
+                        is_heading = bool(
+                            _HEADING_REGEX.match(block_text)
+                            or block_text.startswith("#")
+                            or (
+                                len(block_text.splitlines()) == 1
+                                and len(block_text) < 70
+                                and not block_text.endswith((".", "?", "!", ",", ";"))
+                                and not block_text.startswith(("•", "-", "*"))
+                            )
+                        )
+                        el_type = "heading" if is_heading else "paragraph"
+                        sec_title = (
+                            block_text.lstrip("#").strip() if is_heading else None
+                        )
                         elements.append(
                             DocumentElement(
                                 id=f"temp_el_{el_idx}",
-                                element_type="paragraph",
+                                element_type=el_type,
                                 content=block_text,
                                 page_number=page_num,
+                                section_title=sec_title,
                                 metadata={
                                     "bbox": block[:4] if len(block) >= 4 else None,
                                     "block_number": block[5]

@@ -70,12 +70,23 @@ class RRFEngine:
         for rank_idx, (chunk_id, score) in enumerate(sparse_results, start=1):
             _record_candidate(chunk_id, rank_idx, score, "sparse")
 
-        # 3. Sort candidates descending by RRF score (secondary sort by raw scores for stability)
+        # 3. Sort candidates descending by RRF score (secondary sort by normalized scores for stability)
+        max_sparse = max(
+            (
+                entry["sparse_score"]
+                for entry in candidates_map.values()
+                if entry["sparse_score"] is not None
+            ),
+            default=1.0,
+        )
+        max_sparse = max(max_sparse, 1.0)
+
         sorted_chunk_items = sorted(
             candidates_map.items(),
             key=lambda item: (
                 item[1]["rrf_score"],
-                (item[1]["dense_score"] or 0.0) + (item[1]["sparse_score"] or 0.0),
+                (item[1]["dense_score"] or 0.0)
+                + ((item[1]["sparse_score"] or 0.0) / max_sparse),
             ),
             reverse=True,
         )

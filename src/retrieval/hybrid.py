@@ -65,9 +65,9 @@ class HybridRetriever:
         query: str,
         conversation_history: list[ConversationTurn] | None = None,
         filters: dict[str, Any] | None = None,
-        top_k_dense: int = 25,
-        top_k_sparse: int = 25,
-        top_k_fused: int = 20,
+        top_k_dense: int = 50,
+        top_k_sparse: int = 50,
+        top_k_fused: int = 50,
         rrf_k: int = 60,
     ) -> RetrievalResponse:
         """Execute complete hybrid retrieval with pre-flight query processing and RRF fusion.
@@ -85,6 +85,20 @@ class HybridRetriever:
             RetrievalResponse with fused candidates and execution telemetry.
         """
         start_time = time.perf_counter()
+
+        # Clean empty query handling
+        if not query or not query.strip():
+            elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+            return RetrievalResponse(
+                query=query,
+                processed_query=self.query_processor.process(""),
+                candidates=[],
+                total_candidates=0,
+                dense_count=0,
+                sparse_count=0,
+                execution_time_ms=round(elapsed_ms, 2),
+            )
+
         history_key = [
             turn.model_dump(mode="json") for turn in (conversation_history or [])
         ]
@@ -135,6 +149,26 @@ class HybridRetriever:
             top_k=top_k_sparse,
             filters=combined_filters or None,
         )
+
+        # Adaptive filter relaxation: If auto-extracted filters produced 0 candidates,
+        # fallback to explicit user filters (or None) and search with rewritten query to guarantee high recall
+        if (
+            not dense_results
+            and not sparse_results
+            and processed_query.filters
+            and combined_filters != (filters or {})
+        ):
+            fallback_query = processed_query.rewritten_query or query
+            dense_results = self.dense_retriever.retrieve(
+                query=fallback_query,
+                top_k=top_k_dense,
+                filters=filters,
+            )
+            sparse_results = self.sparse_retriever.retrieve(
+                query=fallback_query,
+                top_k=top_k_sparse,
+                filters=filters,
+            )
 
         # Stage 4: Reciprocal Rank Fusion (RRF)
         candidates: list[RetrievedCandidate] = self.rrf_engine.fuse(

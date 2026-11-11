@@ -164,9 +164,9 @@ class MetadataTagger:
         page_part = str(page) if page is not None else "0"
         chunk_id = f"{slug}_{page_part}_{sequence_num:03d}"
         if document_id:
-            document_suffix = hashlib.sha256(
-                document_id.encode("utf-8")
-            ).hexdigest()[:16]
+            document_suffix = hashlib.sha256(document_id.encode("utf-8")).hexdigest()[
+                :16
+            ]
             chunk_id = f"{chunk_id}_{document_suffix}"
         return chunk_id
 
@@ -217,9 +217,42 @@ class MetadataTagger:
             "has_code": "```" in content,
         }
 
+        # Auto-extract year if present in source_name or content
+        clean_source = re.sub(r"[\W_]+", " ", source_name)
+        year_match = re.search(r"\b(19\d{2}|20\d{2})\b", clean_source)
+        if not year_match and content:
+            clean_content = re.sub(r"[\W_]+", " ", content[:300])
+            year_match = re.search(r"\b(19\d{2}|20\d{2})\b", clean_content)
+        if year_match:
+            meta["year"] = int(year_match.group(1))
+
+        # Auto-extract department if present in source_name or section
+        search_dept_text = re.sub(
+            r"[\W_]+", " ", f"{source_name} {section or ''}".lower()
+        )
+        for dept_raw, dept_std in (
+            ("engineering", "engineering"),
+            ("tech", "engineering"),
+            ("software", "engineering"),
+            ("human resources", "hr"),
+            ("hr", "hr"),
+            ("finance", "finance"),
+            ("accounting", "finance"),
+            ("marketing", "marketing"),
+            ("legal", "legal"),
+            ("operations", "operations"),
+            ("ops", "operations"),
+            ("sales", "sales"),
+            ("product", "product"),
+            ("security", "security"),
+            ("it", "it"),
+        ):
+            if re.search(rf"\b{re.escape(dept_raw)}\b", search_dept_text):
+                meta["department"] = dept_std
+                break
+
         if extra:
             for k, v in extra.items():
-                if k not in meta:
-                    meta[k] = v
+                meta[k] = v
 
         return meta

@@ -179,7 +179,9 @@ def build_evaluation_cases(all_chunks: list[tuple[str, str]]) -> list[dict]:
     cid_sigmoid = find_chunk_id(all_chunks, "Sigmoid transformation: S(x)")
     cid_salience_pruning = find_chunk_id(all_chunks, "salience threshold of 0.15")
     cid_jaccard_dedup = find_chunk_id(all_chunks, "exceeding tau = 0.75")
-    cid_token_reduction = find_chunk_id(all_chunks, "average token reduction of forty-five percent")
+    cid_token_reduction = find_chunk_id(
+        all_chunks, "average token reduction of forty-five percent"
+    )
     cid_sufficiency = find_chunk_id(all_chunks, "sufficiency threshold of 0.40")
     cid_bracketed_format = find_chunk_id(all_chunks, "format [Doc X, Chunk Y]")
     cid_nli_states = find_chunk_id(all_chunks, "Entailed, Neutral, or Contradicted")

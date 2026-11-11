@@ -15,7 +15,7 @@ class TokenBudgetManager:
       <compacted evidence text>
     """
 
-    def __init__(self, default_budget: int = 1500) -> None:
+    def __init__(self, default_budget: int = 4000) -> None:
         self.default_budget = default_budget
 
     @staticmethod

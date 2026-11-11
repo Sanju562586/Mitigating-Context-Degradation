@@ -29,27 +29,27 @@ class FullContextPipelineRequest(BaseModel):
         description="Optional structured metadata filters.",
     )
     top_k_fused: int = Field(
-        default=20,
+        default=50,
         ge=1,
-        le=50,
+        le=100,
         description="Candidate pool size to retrieve from Module 3 hybrid retrieval.",
     )
     rerank_threshold: float = Field(
-        default=0.35,
+        default=0.15,
         ge=0.0,
         le=1.0,
         description="Cutoff threshold tau for Module 4 cross-encoder reranking.",
     )
     rerank_top_n: int = Field(
-        default=5,
+        default=20,
         ge=1,
-        le=20,
+        le=50,
         description="Maximum candidates retained after Module 4 reranking.",
     )
     max_token_budget: int = Field(
-        default=1500,
+        default=4000,
         ge=100,
-        le=8000,
+        le=16000,
         description="Target maximum token allowance for final prompt context.",
     )
     enable_sentence_pruning: bool = Field(

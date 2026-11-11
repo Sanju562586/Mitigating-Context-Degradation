@@ -44,8 +44,8 @@ class CrossEncoderReranker:
     def __init__(
         self,
         engine: CrossEncoderEngine | None = None,
-        default_threshold: float = 0.35,
-        default_top_n: int = 5,
+        default_threshold: float = 0.15,
+        default_top_n: int = 20,
     ) -> None:
         self.engine = engine or default_cross_encoder_engine
         self.default_threshold = default_threshold
@@ -141,13 +141,19 @@ class CrossEncoderReranker:
         # 5. Sort candidates descending by calibrated cross-encoder score
         scored_candidates.sort(key=lambda item: item["rerank_score"], reverse=True)
 
-        # 6. Candidate Pruning Layer: Hard Cutoff (s >= tau) + Top-N Retention
+        # 6. Candidate Pruning Layer: Retain up to top-N (20) chunks, prioritizing s >= tau
         retained_chunks: list[RerankedChunk] = []
-        for item in scored_candidates:
-            if item["rerank_score"] < tau:
-                # Discard candidates falling below the relevance threshold
-                continue
+        qualifying = [item for item in scored_candidates if item["rerank_score"] >= tau]
+        if len(qualifying) < n:
+            qualifying_ids = {id(item) for item in qualifying}
+            remaining = [
+                item for item in scored_candidates if id(item) not in qualifying_ids
+            ]
+            selected = qualifying + remaining[: (n - len(qualifying))]
+        else:
+            selected = qualifying[:n]
 
+        for rank_idx, item in enumerate(selected):
             c: RetrievedCandidate = item["candidate"]
             retained_chunks.append(
                 RerankedChunk(
@@ -160,34 +166,9 @@ class CrossEncoderReranker:
                     initial_score=item["initial_score"],
                     rerank_score=round(item["rerank_score"], 4),
                     raw_score=round(item["raw_score"], 4),
-                    rerank_position=len(retained_chunks) + 1,
+                    rerank_position=rank_idx + 1,
                 )
             )
-
-            # Cap retained candidates to top-N budget
-            if len(retained_chunks) >= n:
-                break
-
-        # Fallback safety: If no candidates exceed tau, retain the top candidate(s)
-        # to allow downstream context compactor and evidence sufficiency gating to evaluate factual coverage
-        if not retained_chunks and scored_candidates:
-            top_candidates = scored_candidates[: min(len(scored_candidates), n)]
-            for rank_idx, item in enumerate(top_candidates):
-                c = item["candidate"]
-                retained_chunks.append(
-                    RerankedChunk(
-                        chunk_id=c.chunk_id,
-                        content=c.content,
-                        document_id=c.document_id,
-                        chunk_index=c.chunk_index,
-                        metadata=c.metadata,
-                        initial_rank=item["initial_rank"],
-                        initial_score=item["initial_score"],
-                        rerank_score=round(item["rerank_score"], 4),
-                        raw_score=round(item["raw_score"], 4),
-                        rerank_position=rank_idx + 1,
-                    )
-                )
 
         pruned_count = total_input - len(retained_chunks)
         elapsed_ms = (time.perf_counter() - start_time) * 1000.0

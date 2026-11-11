@@ -176,7 +176,9 @@ class OfflineGroundedEngine(BaseInferenceEngine):
         if not top_sentences:
             return "The retrieved context does not contain sufficient details to address the query."
 
-        is_plain_prompt = bool(re.search(r"Question:.*?\nAnswer:", prompt, re.IGNORECASE))
+        is_plain_prompt = bool(
+            re.search(r"Question:.*?\nAnswer:", prompt, re.IGNORECASE)
+        )
         # Format answer statements with citation tags
         answer_parts = []
         for _, sent, tag in top_sentences:

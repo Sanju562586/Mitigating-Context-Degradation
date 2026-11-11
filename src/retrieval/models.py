@@ -57,19 +57,19 @@ class RetrievalRequest(BaseModel):
         description="Explicit structured metadata filters (e.g. {'document_type': 'HR_POLICY'}).",
     )
     top_k_dense: int = Field(
-        default=25,
+        default=50,
         ge=1,
         le=100,
         description="Number of candidate chunks to fetch from dense FAISS search.",
     )
     top_k_sparse: int = Field(
-        default=25,
+        default=50,
         ge=1,
         le=100,
         description="Number of candidate chunks to fetch from sparse BM25 search.",
     )
     top_k_fused: int = Field(
-        default=20,
+        default=50,
         ge=1,
         le=100,
         description="Number of fused candidate chunks to output after RRF merging.",

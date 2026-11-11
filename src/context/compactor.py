@@ -44,7 +44,7 @@ class ContextCompactor:
         self,
         query: str,
         chunks: list[RerankedChunk],
-        max_token_budget: int = 1500,
+        max_token_budget: int = 4000,
         enable_sentence_pruning: bool = True,
         enable_deduplication: bool = True,
         enable_lost_in_middle_reordering: bool = True,
@@ -217,7 +217,7 @@ class ContextCompactor:
     def compact_ranked_context(
         self,
         ranked_context: RankedContext,
-        max_token_budget: int = 1500,
+        max_token_budget: int = 4000,
         enable_sentence_pruning: bool = True,
         enable_deduplication: bool = True,
         enable_lost_in_middle_reordering: bool = True,

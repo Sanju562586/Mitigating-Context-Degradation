@@ -54,9 +54,9 @@ class CompactionRequest(BaseModel):
         description="Top-ranked high-confidence chunks from Module 4 cross-encoder reranking.",
     )
     max_token_budget: int = Field(
-        default=1500,
+        default=4000,
         ge=100,
-        le=8000,
+        le=16000,
         description="Target maximum token allowance for the compacted prompt context.",
     )
     enable_sentence_pruning: bool = Field(

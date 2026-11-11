@@ -1,0 +1,678 @@
+\documentclass[conference]{IEEEtran}
+
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{url}
+
+\title{A Modular Evidence-Grounded Question-Answering Pipeline for\\
+Context-Efficient Retrieval and Persistent Memory}
+
+\author{
+\IEEEauthorblockN{Polabathina Ramcharan Teja}
+\IEEEauthorblockA{\textit{Department of Computer Science and Engineering}\\
+\textit{Chaitanya Bharathi Institute of Technology}\\
+Hyderabad, India\\
+ramcharanpolabathina@gmail.com}
+\and
+\IEEEauthorblockN{Dupati Sanjay Kumar}
+\IEEEauthorblockA{\textit{Department of Computer Science and Engineering}\\
+\textit{Chaitanya Bharathi Institute of Technology}\\
+Hyderabad, India\\
+sanjaykumardupati6@gmail.com}
+\and
+\IEEEauthorblockN{Damaraju Sai Vishnu}
+\IEEEauthorblockA{\textit{Assistant Professor, Department of Computer Science and Engineering}\\
+\textit{Chaitanya Bharathi Institute of Technology}\\
+Hyderabad, India}
+}
+
+% AUTHOR ACTION REQUIRED: Review every statement and reference, verify
+% authorship and result provenance, and follow the target venue's disclosure
+% policy for AI-assisted writing before submission.
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Retrieval-augmented question answering can ground generated responses in external
+documents, but a retrieval-and-generation pipeline alone does not ensure that
+evidence is relevant, concise, sufficient, or retained across sessions. This
+paper describes a modular document-question-answering application that combines
+dense FAISS search, BM25 lexical retrieval, query processing, reciprocal-rank
+fusion, cross-encoder reranking, extractive context compaction, a pre-generation
+evidence gate, heuristic claim checks, and optional cross-session memory. We
+document the implementation and its evaluation procedure, which compares
+lexical, dense, hybrid, reranked, and answer-generating configurations. The
+complete application workflow is implemented, but quantitative benchmark
+values in this draft are deliberately marked TBD until they are reproduced
+from a frozen code, data, model, and runtime configuration. This distinction
+prevents unverified or illustrative values from being mistaken for validated
+findings. The evaluation is intended to measure retrieval ranking, answer
+quality, citation identifier overlap, context-token use, latency, and resource
+consumption; each metric has limitations, and citation identifier overlap
+does not establish semantic support. The manuscript should be treated as an
+implementation and evaluation draft until the outstanding measurements and
+their provenance have been independently checked.
+\end{abstract}
+
+\begin{IEEEkeywords}
+retrieval-augmented generation, hybrid retrieval, question answering,
+cross-encoder reranking, context compression, evidence grounding,
+conversational memory
+\end{IEEEkeywords}
+
+\section{Introduction}
+Large language models can accept long inputs, but accepting a long context is
+not equivalent to reliably using every part of it. Empirical work has shown
+that answer quality can depend on where relevant evidence occurs in a prompt,
+with performance often falling when decisive evidence is placed in the middle
+\cite{liu2023lost}. Retrieval-augmented generation (RAG) addresses a different
+but related problem: it supplies an external evidence collection to a generator
+instead of relying exclusively on parametric knowledge \cite{lewis2020rag}.
+However, retrieval may return irrelevant or redundant passages, and generated
+claims still require validation against their cited sources.
+
+This paper describes an end-to-end software project intended to make these
+failure points explicit in one application. It processes user-supplied
+documents, retrieves evidence with dense and sparse indexes, fuses ranked
+results, reranks candidates, compacts and budgets evidence, assesses evidence
+sufficiency, generates a grounded answer, and checks answer claims using
+deterministic lexical and polarity heuristics. An optional memory subsystem
+stores episodic interactions and can retrieve selected prior information in a
+later session. A web interface and API expose document ingestion, querying,
+evaluation, and memory-management operations.
+
+The contribution is an integrated, inspectable implementation and a
+reproducible-evaluation interface, rather than a new embedding model, ranking
+algorithm, or formally validated natural-language-inference method. The
+repository implements established techniques such as BM25, dense retrieval,
+reciprocal-rank fusion, and cross-encoder reranking alongside engineering
+choices for evidence packaging and memory. The experimental evidence currently
+available is a small repository-specific run. It is included to report what
+was measured and to reveal what remains to be tested; it does not support
+claims of broad benchmark superiority.
+
+The remainder of this paper reviews related work, describes the system,
+documents implementation and reproducibility considerations, specifies an
+expanded experimental protocol, reports the available measurements, and
+discusses privacy, governance, and limitations.
+
+\section{Background and Related Work}
+
+\subsection{Long-Context Processing}
+Transformer self-attention provides a general mechanism for relating tokens
+within a sequence \cite{vaswani2017attention}. Increasing the permitted sequence
+length does not guarantee uniform information use. Liu \emph{et al.} evaluated
+language models on multi-document question answering and key-value retrieval
+and reported position-sensitive performance, including degradation when
+relevant content appeared in the middle of long inputs \cite{liu2023lost}.
+This motivates testing both context selection and context ordering. The
+application implements a deterministic U-shaped ordering heuristic that places
+high-ranked evidence at prompt boundaries. It does not claim that reordering
+eliminates the position effect; that claim requires controlled position
+experiments with fixed evidence and models.
+
+\subsection{Retrieval-Augmented Generation}
+RAG combines parametric generation with a non-parametric collection that can
+be searched at inference time \cite{lewis2020rag}. Dense Passage Retrieval
+showed that a dual-encoder can retrieve semantically related passages for
+open-domain question answering \cite{karpukhin2020dpr}. Sentence-BERT is a
+related siamese-encoder approach to producing sentence embeddings
+\cite{reimers2019sbert}. Dense retrieval can bridge vocabulary differences
+but can miss exact terms, identifiers, and rare phrases. Lexical systems such
+as BM25 provide a strong, interpretable baseline based on term statistics
+\cite{robertson2009bm25}. Hybrid systems combine
+complementary ranking signals; this implementation fuses candidate rankings
+rather than training a unified retriever.
+
+\subsection{Reranking and Advanced RAG}
+A cross-encoder jointly processes a query and candidate passage, enabling
+interaction between their token representations at higher computation cost
+than independent bi-encoder scoring. BERT-based passage reranking is a
+representative example \cite{nogueira2019passage}. Reciprocal Rank Fusion
+(RRF) is a rank-based combination method that avoids directly comparing
+incommensurate raw scores \cite{cormack2009rrf}. The system uses both methods
+in a retrieve-then-rerank sequence. Its additional context operations,
+sufficiency rules, and answer checks are application-level modules; their
+individual causal effects have not yet been isolated by ablation.
+
+\subsection{Question-Answering Datasets}
+Question-answering benchmarks encode different tasks and annotation
+assumptions. SQuAD uses questions grounded in passages and answer spans
+\cite{rajpurkar2016squad}; Natural Questions uses real search queries paired
+with Wikipedia pages and short or long answers \cite{kwiatkowski2019nq};
+HotpotQA emphasizes multi-hop evidence and supporting facts
+\cite{yang2018hotpotqa}. BEIR provides heterogeneous information-retrieval
+datasets for out-of-domain assessment \cite{thakur2021beir}. Such public data
+can support external evaluation, but they are not interchangeable with a
+small corpus-specific benchmark. Reference-free RAG evaluation frameworks
+offer another perspective, but do not replace human judgments when claims of
+factual support or citation validity are central \cite{es2023ragas}.
+
+\section{System Design}
+
+\subsection{Overview}
+The application is organized as a sequence of evidence transformations:
+document parsing and chunking; indexing; query understanding; dense and sparse
+retrieval; rank fusion; cross-encoder reranking; context compaction and
+budgeting; evidence sufficiency assessment; generation and claim checking;
+and optional memory synchronization. FastAPI exposes the backend, while a
+Next.js interface supports document, query, evaluation, and memory workflows.
+Provider adapters allow configured external inference services or a
+deterministic offline generator. Provider selection is an operational
+configuration, not part of the retrieval algorithm.
+
+\subsection{Document Ingestion and Chunking}
+The implemented ingestion workflow accepts PDF, DOCX, Markdown, HTML, and
+plain-text files through format-specific parsers. Parsed content is represented
+as structured document elements, normalized, and passed to a semantic chunker.
+The chunker preserves heading boundaries and treats tables and code blocks as
+atomic elements, targets 350 tokens per chunk by default, and requests about
+50 tokens of trailing overlap. Where configured embeddings are available,
+adjacent-sentence similarity can inform boundary selection; the implementation
+also includes a lexical-semantic fallback. Chunk identifiers and source,
+section, and page metadata are carried through indexing for retrieval and
+citation display. Token counts use \texttt{tiktoken} when available and a
+regular-expression approximation otherwise. Thus, the implemented data path is
+complete, while exact chunk boundaries and token counts depend on the parser,
+tokenizer, configuration, and input format. The benchmark must report those
+settings and validate ingestion against a fixed corpus before any performance
+claim is made.
+
+\subsection{Dense Retrieval}
+The dense index uses normalized sentence embeddings from
+\texttt{sentence-transformers/all-MiniLM-L6-v2} and a FAISS inner-product
+index. With unit-normalized vectors, inner product corresponds to cosine
+similarity. A query is encoded and compared with indexed chunks; optional
+metadata filters are applied to the candidate set. Model initialization is
+lazy, which avoids loading the embedding model when the application only needs
+metadata or lexical functionality. Model weights must be available locally
+for offline inference.
+
+\subsection{Sparse Retrieval}
+The lexical path tokenizes text and indexes chunks with BM25. It can match
+terms such as named entities, acronyms, or exact identifiers that may be
+underrepresented by semantic similarity. As with other bag-of-terms methods,
+lexical matching alone does not resolve paraphrase or conversational
+coreference. The sparse index and document metadata are persisted separately
+from transient query state.
+
+\subsection{Query Processing and Hybrid Fusion}
+The query processor rewrites conversational follow-ups using available
+conversation history, assigns an intent label, and extracts structured
+metadata filters. Explicit user filters override extracted filters. Dense
+and sparse ranked lists are combined with
+\begin{equation}
+  \operatorname{RRF}(d) =
+  \sum_{m \in \{\mathrm{dense},\mathrm{sparse}\}}
+  \frac{1}{k + r_m(d)}, \qquad k=60,
+\end{equation}
+where $r_m(d)$ is the one-based rank of candidate $d$ in list $m$.
+Candidates are then hydrated with their text and metadata. The implementation
+contains a fallback retrieval path when automatically inferred filters return
+no candidates; this behavior should be separately evaluated because it can
+change the effective filtering conditions.
+
+\subsection{Cross-Encoder Reranking}
+The implemented reranking stage scores query--passage pairs with
+\texttt{cross-encoder/ms-marco-MiniLM-L-6-v2}. By default, raw scores are
+mapped through a sigmoid, filtered by a configurable threshold, and capped at
+a configured top-$N$. If no candidate meets the threshold, the implementation
+retains leading candidates so that later stages can still assess the available
+evidence. The benchmark exposes a hybrid-plus-cross-encoder configuration,
+allowing reranking output to be compared with first-stage rankings on the same
+queries. The threshold and retention limit are defaults, not values established
+by held-out tuning. This module's implementation and route-level behavior do
+not, on their own, validate relevance quality: model revision, candidate pool,
+threshold, and inference hardware must be fixed and reported in an evaluation.
+The cross-encoder adds a second model pass and therefore introduces a latency
+and resource cost that should be measured rather than assumed.
+
+\subsection{Context Compaction and Budgeting}
+The implemented compactor has four configurable stages: sentence-level
+salience extraction, Jaccard-based deduplication of overlapping sentence
+seams, optional U-shaped evidence reordering, and source-aware citation
+packaging under a hard token budget. The defaults are a deduplication
+similarity threshold of 0.75, minimum sentence salience of 0.15, and a
+1,500-token context limit. Evidence is admitted in ranking order while the
+next complete formatted block fits. The transformations are extractive rather
+than abstractive. The reported token-savings measure compares the original
+text and extracted text for evidence accepted by the budget manager; it is
+not a comparison with the full source documents. Evaluation should measure
+both token reduction and preservation of gold evidence and answer quality,
+using a consistent tokenizer. No compression effectiveness value is asserted
+here before those measurements are reproduced.
+
+\subsection{Evidence Sufficiency and Claim Checking}
+Before generation, a rule-based evidence sufficiency classifier estimates
+whether the compacted evidence covers query terms and may return an
+abstention. When generation proceeds, the prompt requests source-grounded
+claims and bracketed citations. A post-generation verifier segments answer
+sentences and uses lexical overlap, numeric consistency, polarity cues, and
+citation mapping to assign labels such as entailed, neutral, or contradicted.
+Despite these labels, this implementation is not a learned NLI model and does
+not constitute a calibrated semantic entailment guarantee. Its overlap rules
+can accept unsupported paraphrases or reject valid ones; measured results
+should therefore not be described as neural-NLI performance. Learned NLI
+benchmarks such as SNLI illustrate a distinct task and supervision setting
+\cite{bowman2015snli}; the verifier here is a rule-based approximation.
+
+\subsection{Persistent Conversational Memory}
+The memory subsystem stores session records, episodic interactions, summaries,
+permissions, and vector representations using SQLite and local vector
+storage. Before inference, it can retrieve relevant past interactions and a
+session summary, then format selected facts within a token allowance. After
+inference, it can persist the interaction and facts marked as entailed by the
+verifier. A fallback can store the first answer sentence when no verified
+facts are available, so persistence does not guarantee that each stored fact
+has been semantically verified. Read and write permissions are configurable,
+and the UI supports inspection, export, and clearing. Because the current
+search path can retrieve episodic items across sessions in a shared workspace,
+these features require careful access-control and tenant-isolation deployment;
+the implementation should not be assumed to provide security isolation
+merely because it has session identifiers.
+
+\section{Implementation and Reproducibility}
+The repository implements the end-to-end application: a Python backend using
+FastAPI and Pydantic; document parsing and chunking; Sentence-Transformers
+embeddings and FAISS indexing; BM25 retrieval; query processing and rank
+fusion; cross-encoder reranking; context compaction; grounded generation and
+rule-based claim checks; persistent memory; and a Next.js/React frontend.
+API and UI paths connect these components into an operational workflow. The
+statement that a component is implemented is distinct from a claim that its
+empirical effectiveness, production reliability, or security has been fully
+validated. The source repository is identified in the references
+\cite{projectrepository}.
+
+The benchmark runner accepts JSONL rows containing a query and relevant
+chunk IDs; optional gold answers and citation IDs enable additional metrics.
+It compares BM25, Dense FAISS, RRF, Hybrid plus Cross-Encoder, Conventional
+RAG, and the Full Pipeline. Conventional RAG uses top dense results as
+uncompacted context; the Full Pipeline uses hybrid retrieval, reranking,
+compaction, and grounded generation. The runner writes per-query CSV,
+aggregate JSON, a LaTeX table, and paired bootstrap comparisons.
+
+The benchmark runner is implemented and writes per-query results, aggregate
+summaries, a LaTeX table, and paired bootstrap intervals. A result is considered
+reproducible only when its exact inputs and environment are available. Python
+dependency manifests currently specify minimum versions rather than a complete
+resolved lock; the model revisions, provider, hardware, tokenizer selection,
+warm-up policy, and immutable corpus/index snapshot must also be archived.
+The checked-in repository does not include the local evaluation outputs or
+all data needed to reproduce the reported pilot. Accordingly, the numerical
+tables below contain explicit placeholders rather than invented values. To
+complete validation, archive the query set and relevance judgments, corpus or
+redistributable index snapshot, resolved dependencies, model names and
+revisions, inference provider and prompt configuration, random seeds,
+hardware/software environment, exact command, raw per-query output, and code
+commit. Rerun the benchmark from that archive and independently verify the
+aggregates before replacing any TBD entry.
+
+\section{Experimental Protocol}
+
+\subsection{Research Questions}
+The following questions define a prospective evaluation:
+\begin{itemize}
+  \item \textbf{RQ1:} How do dense, sparse, and fused retrieval compare on
+  Recall@10, MRR@10, and nDCG@10 across project-specific and public datasets?
+  \item \textbf{RQ2:} Does reranking improve evidence precision or answer
+  quality relative to first-stage retrieval, and what is its latency cost?
+  \item \textbf{RQ3:} Does compaction reduce prompt tokens while preserving
+  answer quality and gold-evidence coverage?
+  \item \textbf{RQ4:} Do sufficiency gating and claim checking improve
+  abstention calibration and factual support under controlled answerable and
+  unanswerable cases?
+  \item \textbf{RQ5:} Does persistent memory improve follow-up answer quality
+  without increasing cross-session leakage or unsupported fact reuse?
+\end{itemize}
+The workspace includes a 16-question pilot artifact, but its run provenance
+has not been frozen with the code and data. It is not treated as validated
+evidence in the results below. RQ2--RQ5 require controlled experiments beyond
+the benchmark's current pipeline-level comparisons.
+
+\subsection{Datasets}
+The available local pilot set contains 16 project-specific questions,
+relevance chunk IDs, gold answers, and gold citation IDs. Questions concern concepts
+described by the project's own documents. Annotation provenance, the number
+of independent annotators, adjudication, and inter-annotator agreement are
+not recorded. This dataset is therefore an internal pilot set, not a
+representative open-domain QA benchmark.
+
+For external validation, the protocol should evaluate retrieval on BEIR tasks
+with dataset-specific splits and evaluate answer generation on suitable
+public QA sets such as Natural Questions or HotpotQA. Dataset licenses and
+preprocessing requirements must be checked before use. Chunk-level relevance
+and evidence provenance must be mapped consistently; train/development/test
+separation must occur before tuning thresholds, prompts, or chunking
+parameters. Results for public datasets are not included here.
+
+\subsection{Baselines and Ablations}
+The implemented benchmark runner defines six configurations: BM25, Dense
+FAISS, BM25 plus Dense using RRF, Hybrid plus Cross-Encoder, Conventional RAG,
+and Full Pipeline. Retrieval-only configurations produce ranked chunk lists.
+Conventional RAG supplies dense-retrieved text without the full compaction
+path, while Full Pipeline uses hybrid retrieval, reranking, compaction, and
+grounded generation. These comparisons evaluate pipeline configurations but
+do not isolate every component. In particular, ranking comparisons must not
+be conflated with answer-generation comparisons.
+
+The planned component ablation holds the query set, source index, generator,
+prompt, decoding settings, and candidate budget fixed while disabling one
+component at a time: dense retrieval, BM25, RRF, cross-encoder reranking,
+sentence pruning and deduplication, context reordering, sufficiency gating,
+and claim checking. Persistent memory requires a separate set of conditions:
+memory disabled, session-scoped memory, and cross-session memory. Each
+ablation should include the relevant retrieval and answer metrics, token
+usage, latency, and resource measurements. These component-level ablations
+are not represented as completed experiments in this draft; table values
+remain TBD until each condition has been run.
+
+\subsection{Retrieval Metrics}
+Recall@10 is the fraction of annotated relevant chunk IDs appearing in the
+top ten. MRR@10 is the reciprocal rank of the first relevant chunk, with zero
+assigned when none is retrieved. nDCG@10 uses binary relevance and a
+logarithmic rank discount. These metrics are averaged per query by the
+benchmark. Gold relevance judgments must be prepared independently of the
+systems being compared and frozen before parameter tuning. Citation precision
+and recall are also computed by the runner when gold citation IDs are
+provided; they compare sets of chunk identifiers and therefore measure
+identifier overlap only. They do not establish that the text supports an
+answer claim. This distinction should be kept explicit in tables, analysis,
+and conclusions.
+
+\subsection{Answer and Resource Metrics}
+The benchmark computes normalized exact match (EM) and token-overlap F1
+against annotated reference answers. They provide deterministic lexical
+comparisons, but do not fully measure semantic equivalence, factuality, or
+citation support. Abstention status should be evaluated on answerable and
+unanswerable examples, with false-abstention and unsupported-answer rates
+reported in addition to EM/F1. Resource outputs include evidence-context
+tokens, elapsed latency, process RSS, Python traced peak allocation, index
+size, and optional CUDA memory allocation. RSS and Python-traced memory are
+different measures and must be reported separately. Final runs should specify
+whether latency includes model loading, distinguish cold and warm runs,
+repeat measurements, report per-query distributions, and record CPU/GPU,
+memory, operating system, concurrent load, model cache state, provider, and
+model version. No unrecorded hardware or runtime conditions should be inferred
+from the metric values.
+
+\subsection{Statistical Analysis}
+For paired comparisons, the benchmark runner resamples per-query differences
+with replacement, using 2,000 bootstrap replicates, seed 20261104, and
+percentile 95\% intervals. The query is the resampling unit. This is a
+descriptive uncertainty procedure; the implementation does not perform
+hypothesis tests or correct for multiple comparisons. Before a confirmatory
+study, designate primary outcomes, report the number of paired queries and
+missing labels for each metric, freeze the analysis procedure, and select a
+multiple-comparison correction if several hypotheses are tested. Do not treat
+chunks or repeated executions of one query as independent samples. Until the
+input data and output files are frozen and inspected, the intervals and
+statistical conclusions remain TBD.
+
+\subsection{Fairness and Control Conditions}
+The controlled comparison must supply the same documents, queries,
+conversation history, explicit filters, answerability labels, and candidate
+pool limits to every applicable configuration. Answer-generating conditions
+must use the same generator, model revision, prompt policy, temperature,
+maximum output length, and decoding configuration. Freeze index, tokenizer,
+and model revisions before running the test set; tune thresholds only on a
+separate development set. Report results by query type, source, and language
+where labels and sample sizes support meaningful analysis, and include
+accessibility and subgroup considerations appropriate to lawful data
+collection. The available pilot artifact contains no subgroup or demographic analysis
+and supports no fairness claim. Fairness testing and
+control checks should be documented before any such claim is made.
+
+\section{Results}
+
+\subsection{Retrieval Performance}
+The evaluation runner produces Recall@10, MRR@10, nDCG@10, and chunk-ID
+citation overlap for each retrieval configuration. Table~\ref{tab:retrieval}
+is the reporting template for the frozen evaluation set. Its cells remain
+TBD until the benchmark has been rerun with archived data, annotations,
+environment, and model revisions. No performance ordering or retrieval
+improvement is claimed from placeholder entries. After validation, report
+the number of queries and annotation protocol with the table, and interpret
+citation overlap separately from semantic evidence support.
+
+\begin{table*}[t]
+\centering
+\caption{Retrieval and chunk-ID citation metrics on the frozen evaluation set}
+\label{tab:retrieval}
+\begin{tabular}{lrrrrr}
+\toprule
+Method & R@10 & MRR@10 & nDCG@10 & Cit.P. & Cit.R. \\
+\midrule
+BM25 & \texttt{TBD} & \texttt{TBD} & \texttt{TBD} & \texttt{TBD} & \texttt{TBD} \\
+Dense FAISS & \texttt{TBD} & \texttt{TBD} & \texttt{TBD} & \texttt{TBD} & \texttt{TBD} \\
+BM25 + Dense (RRF) & \texttt{TBD} & \texttt{TBD} & \texttt{TBD} & \texttt{TBD} & \texttt{TBD} \\
+Hybrid + Cross-Encoder & \texttt{TBD} & \texttt{TBD} & \texttt{TBD} & \texttt{TBD} & \texttt{TBD} \\
+Conventional RAG & \texttt{TBD} & \texttt{TBD} & \texttt{TBD} & \texttt{TBD} & \texttt{TBD} \\
+Full Pipeline & \texttt{TBD} & \texttt{TBD} & \texttt{TBD} & \texttt{TBD} & \texttt{TBD} \\
+\bottomrule
+\end{tabular}
+
+\vspace{1mm}
+\footnotesize R@10: Recall@10; Cit.P./Cit.R.: chunk-ID citation
+precision/recall. Citation overlap is not a semantic support judgment.
+\end{table*}
+
+\subsection{End-to-End Answer Quality and Resource Use}
+The answer and resource metrics are generated for Conventional RAG and Full
+Pipeline when answer generation is enabled. Table~\ref{tab:answers} is
+intentionally left with TBD values until the same frozen benchmark is
+executed for both conditions. This avoids turning sample, stale, or
+unreproduced outputs into findings. After validation, interpret answer
+quality jointly with abstention and evidence support, and report context
+tokens and latency together: a smaller context does not by itself establish
+lower total inference cost or better answers. State the evaluation hardware,
+provider, model, and timing protocol alongside all resource results.
+
+\begin{table}[t]
+\centering
+\caption{Answer and resource metrics on the frozen evaluation set}
+\label{tab:answers}
+\begin{tabular}{lrr}
+\toprule
+Metric & Conventional RAG & Full Pipeline \\
+\midrule
+QA EM & \texttt{TBD} & \texttt{TBD} \\
+QA token F1 & \texttt{TBD} & \texttt{TBD} \\
+Citation precision & \texttt{TBD} & \texttt{TBD} \\
+Citation recall & \texttt{TBD} & \texttt{TBD} \\
+Median latency (ms) & \texttt{TBD} & \texttt{TBD} \\
+p95 latency (ms) & \texttt{TBD} & \texttt{TBD} \\
+Mean context tokens & \texttt{TBD} & \texttt{TBD} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Ablation and Significance}
+The analysis script can produce paired bootstrap intervals for comparisons
+with the Full Pipeline, but it does not implement component ablations or
+formal significance tests. The table below reserves space for the
+pre-registered primary paired outcomes and per-component ablation results.
+Populate it only from the frozen per-query output; report the number of
+paired queries, interval method, multiplicity procedure, and analysis seed.
+Until these experiments are completed, no ablation effect or statistical
+significance claim is made.
+
+\begin{table}[t]
+\centering
+\caption{Planned ablation and paired analysis results}
+\label{tab:ablation}
+\begin{tabular}{lrr}
+\toprule
+Condition & Primary metric & Result / 95\% CI \\
+\midrule
+Full Pipeline vs. Conventional RAG & QA F1 difference & \texttt{TBD} \\
+Without dense retrieval & Retrieval / QA change & \texttt{TBD} \\
+Without BM25 & Retrieval / QA change & \texttt{TBD} \\
+Without cross-encoder & Evidence precision change & \texttt{TBD} \\
+Without compaction & Context / QA change & \texttt{TBD} \\
+Without sufficiency gate & Abstention / support change & \texttt{TBD} \\
+Without claim checking & Support-check change & \texttt{TBD} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Privacy, Security, and Data Governance}
+The application handles user documents, queries, generated answers, and
+persistent conversational records. Local SQLite and vector-index storage
+does not, by itself, provide encryption at rest, access isolation, retention
+policy enforcement, or secure deletion guarantees. The current README
+describes the local API as unauthenticated and the workspace as shared among
+clients able to reach the backend. A deployment reachable beyond a trusted
+host should therefore add authentication, authorization, tenant isolation,
+transport security, rate limits, audit logging, and explicit administrative
+controls before processing sensitive data.
+
+When a hosted inference provider is configured, prompts and selected evidence
+may leave the local environment; administrators must inspect provider terms,
+logging, retention, and regional processing behavior. Memory read/write
+permissions, session inspection, export, and clear operations are useful
+controls but do not substitute for user consent, retention limits, or
+verified deletion. The browser extension can send selected or captured page
+content to the configured backend and should clearly communicate capture
+scope and destination. Before deployment, data minimization, user-visible
+consent, provenance, retention schedules, backups, access reviews, and
+incident response should be documented. Risk management should be aligned
+with the deployment context and applicable law \cite{nist2023airmf}.
+
+\section{Discussion and Limitations}
+The system's primary practical value is modularity: retrieval, ranking,
+compaction, generation, and memory can be inspected and configured as
+separate stages. The observed pilot results are consistent with a tradeoff
+between a compact evidence context and additional retrieval/reranking
+latency. They do not prove that the pipeline is more accurate in general.
+All methods achieved perfect Recall@10 on the local questions, suggesting
+that this pilot is not discriminative for retrieval recall. Exact match was
+zero, and the token F1 result is not a human judgment of correctness.
+
+Important limitations include the 16-query sample; project-specific source
+content; undocumented annotation protocol; absence of external benchmark
+results; incomplete model, provider, and hardware metadata; unpinned resolved
+dependencies; and result files that are not versioned with the source
+repository. Chunk-ID overlap overstates what can be inferred about semantic
+citation support. The sufficiency and claim-verification components are
+heuristic and have not been calibrated against human-labeled entailment.
+Context compaction may discard needed evidence, and the first-fit hard
+budgeter can reject later blocks after an oversized candidate. The reported
+generation and resource measurements are a single available snapshot rather
+than repeated controlled trials.
+
+The current study also does not evaluate memory utility, privacy leakage,
+security isolation, fairness across user groups, multilingual inputs, or
+adversarial prompt/document content. The architecture should be treated as a
+research prototype, not a safety certification or a guarantee against
+hallucination. A stronger evaluation should use larger and independently
+annotated datasets, blinded human support judgments, repeated runs, controlled
+ablations, explicit answerability tests, external reproducibility artifacts,
+and deployment-specific security review.
+
+\section{Conclusion}
+This paper documented a modular question-answering application combining
+dense and sparse retrieval, rank fusion, cross-encoder reranking, extractive
+context compaction, a sufficiency gate, heuristic claim checks, and optional
+persistent memory. A local 16-question pilot reported higher token F1 and
+chunk-ID citation precision, and fewer assembled evidence tokens, for the
+Full Pipeline than for Conventional RAG, alongside substantially higher
+latency. The small, project-specific sample and incomplete provenance prevent
+general conclusions. The next steps are to freeze and publish the exact
+experimental configuration, evaluate public and domain-specific datasets,
+conduct component ablations and human evidence audits, and strengthen
+security and privacy controls before deployment.
+
+\begin{thebibliography}{16}
+
+\bibitem{liu2023lost}
+N. F. Liu, K. Lin, J. Hewitt, A. Paranjape, M. Bevilacqua, F. Petroni, and
+P. Liang, ``Lost in the Middle: How Language Models Use Long Contexts,''
+\emph{Trans. Assoc. Comput. Linguistics}, vol. 12, pp. 157--173, 2024,
+doi: 10.1162/tacl\_a\_00638.
+
+\bibitem{vaswani2017attention}
+A. Vaswani \emph{et al.}, ``Attention is all you need,'' in
+\emph{Proc. Adv. Neural Inf. Process. Syst.}, 2017, pp. 5998--6008.
+
+\bibitem{lewis2020rag}
+P. Lewis \emph{et al.}, ``Retrieval-augmented generation for knowledge-intensive
+NLP tasks,'' in \emph{Proc. Adv. Neural Inf. Process. Syst.}, vol. 33, 2020,
+pp. 9459--9474.
+
+\bibitem{karpukhin2020dpr}
+V. Karpukhin \emph{et al.}, ``Dense passage retrieval for open-domain question
+answering,'' in \emph{Proc. Conf. Empirical Methods Natural Language
+Processing}, 2020, pp. 6769--6781, doi: 10.18653/v1/2020.emnlp-main.550.
+
+\bibitem{robertson2009bm25}
+S. Robertson and H. Zaragoza, ``The probabilistic relevance framework: BM25
+and beyond,'' \emph{Found. Trends Inf. Retrieval}, vol. 3, no. 4, pp. 333--389,
+2009, doi: 10.1561/1500000019.
+
+\bibitem{cormack2009rrf}
+G. V. Cormack, C. L. A. Clarke, and S. Buettcher, ``Reciprocal rank fusion
+outperforms Condorcet and individual rank learning methods,'' in
+\emph{Proc. 32nd Annu. Int. ACM SIGIR Conf. Research and Development in
+Information Retrieval}, 2009, pp. 758--759, doi: 10.1145/1571941.1572114.
+
+\bibitem{nogueira2019passage}
+R. Nogueira and K. Cho, ``Passage re-ranking with BERT,'' 2019,
+arXiv:1901.04085. [Online]. Available: \url{https://arxiv.org/abs/1901.04085}
+
+\bibitem{rajpurkar2016squad}
+P. Rajpurkar, J. Zhang, K. Lopyrev, and P. Liang, ``SQuAD: 100,000+ questions
+for machine comprehension of text,'' in \emph{Proc. Conf. Empirical Methods
+Natural Language Processing}, 2016, pp. 2383--2392,
+doi: 10.18653/v1/D16-1264.
+
+\bibitem{kwiatkowski2019nq}
+T. Kwiatkowski \emph{et al.}, ``Natural Questions: A benchmark for question
+answering research,'' \emph{Trans. Assoc. Comput. Linguistics}, vol. 7,
+pp. 452--466, 2019, doi: 10.1162/tacl\_a\_00276.
+
+\bibitem{yang2018hotpotqa}
+Z. Yang \emph{et al.}, ``HotpotQA: A dataset for diverse, explainable
+multi-hop question answering,'' in \emph{Proc. Conf. Empirical Methods
+Natural Language Processing}, 2018, pp. 2369--2380,
+doi: 10.18653/v1/D18-1259.
+
+\bibitem{thakur2021beir}
+N. Thakur, N. Reimers, A. R\"uckl\'e, A. Srivastava, and I. Gurevych,
+``BEIR: A heterogeneous benchmark for zero-shot evaluation of information
+retrieval models,'' in \emph{Proc. Adv. Neural Inf. Process. Syst. Datasets
+and Benchmarks Track}, 2021. [Online]. Available:
+\url{https://arxiv.org/abs/2104.08663}
+
+\bibitem{es2023ragas}
+R. Es \emph{et al.}, ``RAGAS: Automated evaluation of retrieval augmented
+generation,'' 2023, arXiv:2309.15217. [Online]. Available:
+\url{https://arxiv.org/abs/2309.15217}
+
+\bibitem{nist2023airmf}
+E. Tabassi, ``Artificial intelligence risk management framework (AI RMF
+1.0),'' National Institute of Standards and Technology, Gaithersburg, MD,
+USA, NIST AI 100-1, Jan. 2023, doi: 10.6028/NIST.AI.100-1.
+
+\bibitem{bowman2015snli}
+S. R. Bowman, G. Angeli, C. Potts, and C. D. Manning, ``A large annotated
+corpus for learning natural language inference,'' in \emph{Proc. Conf.
+Empirical Methods Natural Language Processing}, 2015, pp. 632--642,
+doi: 10.18653/v1/D15-1075.
+
+\bibitem{reimers2019sbert}
+N. Reimers and I. Gurevych, ``Sentence-BERT: Sentence embeddings using
+Siamese BERT-networks,'' in \emph{Proc. Conf. Empirical Methods Natural
+Language Processing and Int. Joint Conf. Natural Language Processing:
+System Demonstrations}, 2019, pp. 3982--3992,
+doi: 10.18653/v1/D19-1410.
+
+\bibitem{projectrepository}
+Mitigating-Context-Degradation contributors, ``Mitigating Context
+Degradation,'' software
+repository, 2026. [Online]. Available:
+\url{https://github.com/Sanju562586/Mitigating-Context-Degradation}
+
+\end{thebibliography}
+
+\end{document}

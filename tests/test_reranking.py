@@ -272,5 +272,5 @@ class TestRerankingAPI:
         assert data["status"] == "ready"
         assert data["module"] == "Deep Cross-Encoder Reranking & Pruning"
         assert "cross-encoder" in data["model_name"]
-        assert data["default_threshold"] == 0.35
-        assert data["default_top_n"] == 5
+        assert data["default_threshold"] == 0.15
+        assert data["default_top_n"] == 20
