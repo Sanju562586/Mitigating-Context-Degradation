@@ -122,8 +122,16 @@ class TestCrossEncoderReranker:
 
     def test_hard_cutoff_threshold_pruning(self, mock_candidates):
         query = "How many days of paid vacation do employees receive annually?"
-        # Set aggressive threshold tau=0.5: irrelevant biology chunk should be pruned
-        result = default_reranker.rerank(
+        class FixedScoreEngine:
+            model_name = "test-cross-encoder"
+
+            def predict(self, pairs):
+                assert len(pairs) == len(mock_candidates)
+                return np.array([2.0, 1.0, -2.0], dtype=np.float32)
+
+        # Fixed logits isolate threshold behavior from model weights and downloads.
+        reranker = CrossEncoderReranker(engine=FixedScoreEngine())
+        result = reranker.rerank(
             query=query,
             candidates=mock_candidates,
             threshold=0.5,
