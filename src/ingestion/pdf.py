@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-import fitz  # PyMuPDF
+try:
+    import pymupdf as fitz
+except ImportError:
+    import fitz  # PyMuPDF fallback
 
 from src.ingestion.base import BaseParser
 from src.ingestion.models import Document, DocumentElement, DocumentType

@@ -4,8 +4,12 @@ import io
 from pathlib import Path
 
 import docx
-import fitz  # PyMuPDF
 import pytest
+
+try:
+    import pymupdf as fitz
+except ImportError:
+    import fitz  # PyMuPDF fallback
 
 from src.ingestion.docx import DocxParser
 from src.ingestion.html import HtmlParser
