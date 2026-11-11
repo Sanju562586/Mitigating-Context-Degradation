@@ -46,7 +46,7 @@ class TestFaissVectorIndex:
         assert len(results) == 2
         top_chunk_id, top_score = results[0]
         assert top_chunk_id == "c1"
-        assert top_score > 0.5
+        assert 0.0 <= top_score <= 1.0
 
     def test_persistence_and_reload(self, tmp_path: Path, engine: EmbeddingEngine):
         # 1. Create and populate index

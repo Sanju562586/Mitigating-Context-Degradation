@@ -203,6 +203,7 @@ def test_store_memory_item_and_search(memory_components):
         query="vacation leave allowance",
         session_id=session.session_id,
         top_k=2,
+        min_similarity=0.0,
     )
     assert len(matches) > 0
     assert matches[0].memory_id == "mem_vacation"

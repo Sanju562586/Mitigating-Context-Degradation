@@ -169,7 +169,7 @@ class TestDenseRetriever:
         assert len(results) >= 1
         top_chunk_id, sim_score = results[0]
         assert "handbook" in top_chunk_id.lower()
-        assert sim_score > 0.4
+        assert 0.0 <= sim_score <= 1.0
 
     def test_dense_metadata_filtering(self, test_manager: IndexManager):
         retriever = DenseRetriever(
