@@ -7,8 +7,11 @@ import os
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
+from typing import NoReturn
 
 from dotenv import load_dotenv
+from langchain_core.language_models.chat_models import BaseChatModel
+from openai import APIConnectionError, APIStatusError
 
 load_dotenv()
 
@@ -209,25 +212,61 @@ class OfflineGroundedEngine(BaseInferenceEngine):
 
 
 class OpenAICompatibleEngine(BaseInferenceEngine):
-    """Client for OpenAI-compatible APIs (OpenAI, Ollama, vLLM, LMStudio, LocalAI)."""
+    """LangChain client for OpenAI-compatible chat-completion APIs."""
+
+    requires_api_key = False
 
     def __init__(
         self,
         base_url: str | None = None,
         api_key: str | None = None,
         model_name: str | None = None,
+        default_headers: dict[str, str] | None = None,
     ) -> None:
         self.base_url = (
             base_url
             or os.getenv("OPENAI_BASE_URL")
             or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
         ).rstrip("/")
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY", "dummy-key")
+        self.api_key = (
+            api_key if api_key is not None else os.getenv("OPENAI_API_KEY", "dummy-key")
+        )
         self._model_name = model_name or os.getenv("OPENAI_MODEL_NAME", "llama3.2")
+        self.default_headers = default_headers
 
     @property
     def model_name(self) -> str:
         return self._model_name
+
+    def is_configured(self) -> bool:
+        return not self.requires_api_key or bool(self.api_key and self.api_key.strip())
+
+    def _raise_api_error(self, error: APIConnectionError | APIStatusError) -> NoReturn:
+        if isinstance(error, APIConnectionError):
+            raise RuntimeError(
+                f"Cannot connect to LLM service at {self.base_url}. If using Ollama, ensure it is running (`ollama serve`), or switch LLM Engine to 'Offline (Deterministic)'."
+            ) from error
+
+        if error.status_code in (401, 403):
+            raise RuntimeError(
+                f"LLM API authorization failed (HTTP {error.status_code}) for model '{self._model_name}'. Configure a valid API key or switch to 'Offline (Deterministic)'."
+            ) from error
+        raise RuntimeError(
+            f"LLM API error (HTTP {error.status_code}): {error.response.text[:200]}"
+        ) from error
+
+    def _chat_model(self, temperature: float, max_tokens: int) -> BaseChatModel:
+        from langchain_openai import ChatOpenAI
+
+        return ChatOpenAI(
+            model=self._model_name,
+            base_url=self.base_url,
+            api_key=self.api_key,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=60.0,
+            default_headers=self.default_headers,
+        )
 
     def generate(
         self,
@@ -236,44 +275,18 @@ class OpenAICompatibleEngine(BaseInferenceEngine):
         temperature: float = 0.0,
         max_tokens: int = 1024,
     ) -> str:
-        """Call standard OpenAI chat completions endpoint."""
-        import httpx
+        """Generate a completion through LangChain's shared model interface."""
+        from langchain_core.messages import HumanMessage, SystemMessage
 
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": self._model_name,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": False,
-        }
-
-        with httpx.Client(timeout=60.0) as client:
-            try:
-                resp = client.post(
-                    f"{self.base_url}/chat/completions", headers=headers, json=payload
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                return data["choices"][0]["message"]["content"]
-            except httpx.ConnectError:
-                raise RuntimeError(
-                    f"Cannot connect to LLM service at {self.base_url}. If using Ollama, ensure it is running (`ollama serve`), or switch LLM Engine to 'Offline (Deterministic)'."
-                )
-            except httpx.HTTPStatusError as e:
-                if e.response.status_code in (401, 403):
-                    raise RuntimeError(
-                        f"LLM API authorization failed (HTTP {e.response.status_code}) for model '{self._model_name}'. Configure a valid API key or switch to 'Offline (Deterministic)'."
-                    )
-                raise RuntimeError(
-                    f"LLM API error (HTTP {e.response.status_code}): {e.response.text[:200]}"
-                )
+        try:
+            response = self._chat_model(temperature, max_tokens).invoke(
+                [SystemMessage(content=system_prompt), HumanMessage(content=prompt)]
+            )
+        except (APIConnectionError, APIStatusError) as error:
+            self._raise_api_error(error)
+        if not isinstance(response.content, str):
+            raise TypeError("The configured chat model returned non-text content.")
+        return response.content
 
     def generate_stream(
         self,
@@ -282,49 +295,23 @@ class OpenAICompatibleEngine(BaseInferenceEngine):
         temperature: float = 0.0,
         max_tokens: int = 1024,
     ) -> Iterator[str]:
-        """Stream tokens via Server-Sent Events from OpenAI-compatible endpoint."""
-        import json
+        """Stream completion chunks through the shared LangChain model interface."""
+        from langchain_core.messages import HumanMessage, SystemMessage
 
-        import httpx
-
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": self._model_name,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": True,
-        }
-
-        with httpx.Client(timeout=60.0) as client:
-            with client.stream(
-                "POST",
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-            ) as response:
-                response.raise_for_status()
-                for line in response.iter_lines():
-                    if not line:
-                        continue
-                    if line.startswith("data: "):
-                        data_str = line[len("data: ") :].strip()
-                        if data_str == "[DONE]":
-                            break
-                        try:
-                            chunk = json.loads(data_str)
-                            delta = chunk["choices"][0].get("delta", {})
-                            content = delta.get("content", "")
-                            if content:
-                                yield content
-                        except json.JSONDecodeError:
-                            continue
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=prompt),
+        ]
+        try:
+            for chunk in self._chat_model(temperature, max_tokens).stream(messages):
+                if not isinstance(chunk.content, str):
+                    raise TypeError(
+                        "The configured chat model returned non-text content."
+                    )
+                if chunk.content:
+                    yield chunk.content
+        except (APIConnectionError, APIStatusError) as error:
+            self._raise_api_error(error)
 
 
 class AnthropicEngine(BaseInferenceEngine):
@@ -512,19 +499,22 @@ class GeminiEngine(BaseInferenceEngine):
                             continue
 
 
-class GroqEngine(BaseInferenceEngine):
-    """Client for Groq Cloud ultra-fast inference API with OpenAI-compatible SSE streaming."""
+class GroqEngine(OpenAICompatibleEngine):
+    """Groq adapter using its OpenAI-compatible chat-completions API."""
+
+    requires_api_key = True
 
     def __init__(
         self,
         api_key: str | None = None,
         model_name: str | None = None,
     ) -> None:
-        self.api_key = api_key or os.getenv("GROQ_API_KEY", "")
-        self._model_name = model_name or os.getenv(
-            "GROQ_MODEL_NAME", "llama-3.3-70b-versatile"
+        super().__init__(
+            base_url="https://api.groq.com/openai/v1",
+            api_key=api_key or os.getenv("GROQ_API_KEY", ""),
+            model_name=model_name
+            or os.getenv("GROQ_MODEL_NAME", "llama-3.3-70b-versatile"),
         )
-        self.base_url = "https://api.groq.com/openai/v1"
 
     @property
     def model_name(self) -> str:
@@ -534,109 +524,27 @@ class GroqEngine(BaseInferenceEngine):
     def name(self) -> str:
         return "Groq"
 
-    def is_configured(self) -> bool:
-        return bool(self.api_key and self.api_key.strip())
 
-    def generate(
-        self,
-        prompt: str,
-        system_prompt: str,
-        temperature: float = 0.0,
-        max_tokens: int = 1024,
-    ) -> str:
-        if not self.is_configured():
-            raise ValueError("GROQ_API_KEY is not configured in .env.")
-        import httpx
+class OpenRouterEngine(OpenAICompatibleEngine):
+    """OpenRouter adapter using its OpenAI-compatible chat-completions API."""
 
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": self._model_name,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": False,
-        }
-        with httpx.Client(timeout=45.0) as client:
-            resp = client.post(
-                f"{self.base_url}/chat/completions", headers=headers, json=payload
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            return data["choices"][0]["message"]["content"]
-
-    def generate_stream(
-        self,
-        prompt: str,
-        system_prompt: str,
-        temperature: float = 0.0,
-        max_tokens: int = 1024,
-    ) -> Iterator[str]:
-        if not self.is_configured():
-            raise ValueError("GROQ_API_KEY is not configured in .env.")
-        import json
-
-        import httpx
-
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": self._model_name,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": True,
-        }
-        with httpx.Client(timeout=45.0) as client:
-            with client.stream(
-                "POST",
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-            ) as response:
-                response.raise_for_status()
-                for line in response.iter_lines():
-                    if not line:
-                        continue
-                    if line.startswith("data: "):
-                        data_str = line[len("data: ") :].strip()
-                        if data_str == "[DONE]":
-                            break
-                        try:
-                            chunk = json.loads(data_str)
-                            choices = chunk.get("choices", [])
-                            if choices:
-                                delta = choices[0].get("delta", {})
-                                token = delta.get("content", "")
-                                if token:
-                                    yield token
-                        except Exception:
-                            continue
-
-
-class OpenRouterEngine(BaseInferenceEngine):
-    """Client for OpenRouter unified LLM API with OpenAI-compatible SSE streaming."""
+    requires_api_key = True
 
     def __init__(
         self,
         api_key: str | None = None,
         model_name: str | None = None,
     ) -> None:
-        self.api_key = api_key or os.getenv("OPENROUTER_API_KEY", "")
-        self._model_name = model_name or os.getenv(
-            "OPENROUTER_MODEL_NAME", "meta-llama/llama-3.3-70b-instruct"
+        super().__init__(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=api_key or os.getenv("OPENROUTER_API_KEY", ""),
+            model_name=model_name
+            or os.getenv("OPENROUTER_MODEL_NAME", "meta-llama/llama-3.3-70b-instruct"),
+            default_headers={
+                "HTTP-Referer": "http://localhost:3000",
+                "X-Title": "Mitigating Context Degradation",
+            },
         )
-        self.base_url = "https://openrouter.ai/api/v1"
 
     @property
     def model_name(self) -> str:
@@ -645,99 +553,6 @@ class OpenRouterEngine(BaseInferenceEngine):
     @property
     def name(self) -> str:
         return "OpenRouter"
-
-    def is_configured(self) -> bool:
-        return bool(self.api_key and self.api_key.strip())
-
-    def generate(
-        self,
-        prompt: str,
-        system_prompt: str,
-        temperature: float = 0.0,
-        max_tokens: int = 1024,
-    ) -> str:
-        if not self.is_configured():
-            raise ValueError("OPENROUTER_API_KEY is not configured in .env.")
-        import httpx
-
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "HTTP-Referer": "http://localhost:3000",
-            "X-Title": "Mitigating Context Degradation",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": self._model_name,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": False,
-        }
-        with httpx.Client(timeout=45.0) as client:
-            resp = client.post(
-                f"{self.base_url}/chat/completions", headers=headers, json=payload
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            return data["choices"][0]["message"]["content"]
-
-    def generate_stream(
-        self,
-        prompt: str,
-        system_prompt: str,
-        temperature: float = 0.0,
-        max_tokens: int = 1024,
-    ) -> Iterator[str]:
-        if not self.is_configured():
-            raise ValueError("OPENROUTER_API_KEY is not configured in .env.")
-        import json
-
-        import httpx
-
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "HTTP-Referer": "http://localhost:3000",
-            "X-Title": "Mitigating Context Degradation",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": self._model_name,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": True,
-        }
-        with httpx.Client(timeout=45.0) as client:
-            with client.stream(
-                "POST",
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-            ) as response:
-                response.raise_for_status()
-                for line in response.iter_lines():
-                    if not line:
-                        continue
-                    if line.startswith("data: "):
-                        data_str = line[len("data: ") :].strip()
-                        if data_str == "[DONE]":
-                            break
-                        try:
-                            chunk = json.loads(data_str)
-                            choices = chunk.get("choices", [])
-                            if choices:
-                                delta = choices[0].get("delta", {})
-                                token = delta.get("content", "")
-                                if token:
-                                    yield token
-                        except Exception:
-                            continue
 
 
 class FallbackInferenceEngine(BaseInferenceEngine):
