@@ -7,7 +7,7 @@ import logging
 import time
 from typing import Any
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -18,12 +18,21 @@ from src.generation.models import (
     GenerationRequest,
     GenerationResponse,
 )
+from src.memory.session_registry import default_session_registry
 from src.query_processing.models import ConversationTurn
 from src.reranking.reranker import default_reranker
 from src.retrieval.hybrid import default_hybrid_retriever
 
 router = APIRouter(prefix="/api/generate", tags=["Grounded Generation & Guardrails"])
 logger = logging.getLogger("uvicorn.error")
+
+
+def _validate_session(session_id: str) -> None:
+    if default_session_registry.get_session(session_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session with ID '{session_id}' not found.",
+        )
 
 
 class FullQAPipelineRequest(BaseModel):
@@ -154,6 +163,7 @@ def run_full_qa_pipeline(payload: FullQAPipelineRequest) -> GenerationResponse:
     # 0. Optional Module 7: Pre-Inference Memory Sync
     memory_context_str: str | None = None
     if payload.session_id:
+        _validate_session(payload.session_id)
         from src.memory.synchronizer import default_memory_synchronizer
 
         sync_ctx = default_memory_synchronizer.pre_inference_sync(
@@ -284,6 +294,9 @@ def compare_naive_vs_grounded(payload: FullQAPipelineRequest) -> ComparisonRespo
 )
 def stream_compare_pipeline(payload: FullQAPipelineRequest) -> StreamingResponse:
     """Stream end-to-end question answering comparison with live token streaming and guardrail telemetry."""
+    if payload.session_id:
+        _validate_session(payload.session_id)
+
 
     def event_stream():
         start_time = time.perf_counter()
@@ -315,10 +328,12 @@ def stream_compare_pipeline(payload: FullQAPipelineRequest) -> StreamingResponse
 
             # Stage 4: Sufficiency Gate
             yield f"event: stage\ndata: {json.dumps({'stage': 'sufficiency', 'message': 'Evaluating evidence sufficiency gate...'})}\n\n"
-            sufficiency = default_grounded_generator.sufficiency_classifier.assess_sufficiency(
-                query=payload.query,
-                context=compacted_context,
-                threshold=payload.sufficiency_threshold,
+            sufficiency = (
+                default_grounded_generator.sufficiency_classifier.assess_sufficiency(
+                    query=payload.query,
+                    context=compacted_context,
+                    threshold=payload.sufficiency_threshold,
+                )
             )
             yield f"event: sufficiency\ndata: {json.dumps(sufficiency.model_dump())}\n\n"
 
@@ -337,7 +352,11 @@ def stream_compare_pipeline(payload: FullQAPipelineRequest) -> StreamingResponse
             # Stage 5: Grounded Inference Streaming
             from src.generation.engine import EngineFactory
 
-            engine = EngineFactory.create_engine(payload.provider) if payload.provider else default_grounded_generator.engine
+            engine = (
+                EngineFactory.create_engine(payload.provider)
+                if payload.provider
+                else default_grounded_generator.engine
+            )
 
             yield f"event: stage\ndata: {json.dumps({'stage': 'generation', 'message': f'Streaming grounded response via {engine.model_name}...'})}\n\n"
             yield f"event: provider\ndata: {json.dumps({'model': engine.model_name, 'provider': getattr(engine, 'last_used_name', 'Auto-Fallback')})}\n\n"
@@ -350,11 +369,17 @@ def stream_compare_pipeline(payload: FullQAPipelineRequest) -> StreamingResponse
                 grounded_answer_chunks.append(abstention_text)
                 yield f"event: abstention\ndata: {json.dumps({'answer': abstention_text, 'reason': sufficiency.reasoning})}\n\n"
             else:
-                prompt = default_grounded_generator.prompt_synthesizer.synthesize_prompt(
-                    query=payload.query,
-                    context=compacted_context,
-                    conversation_history=payload.conversation_history,
-                    memory_context=memory_context_str,
+                prompt = (
+                    default_grounded_generator.prompt_synthesizer.synthesize_prompt(
+                        query=payload.query,
+                        context=compacted_context,
+                        conversation_history=payload.conversation_history,
+                        memory_context=memory_context_str,
+                    )
+                )
+                yield (
+                    "event: context\n"
+                    f"data: {json.dumps([item.model_dump() for item in compacted_context.evidence_items])}\n\n"
                 )
                 for token in engine.generate_stream(
                     prompt=prompt,
@@ -374,7 +399,9 @@ def stream_compare_pipeline(payload: FullQAPipelineRequest) -> StreamingResponse
                 context=compacted_context,
                 tolerance=payload.hallucination_threshold,
             )
-            citations = default_grounded_generator.verifier.extract_citations(full_grounded_answer)
+            citations = default_grounded_generator.verifier.extract_citations(
+                full_grounded_answer
+            )
             yield f"event: grounding\ndata: {json.dumps(grounding_report.model_dump())}\n\n"
 
             # Stage 7: Naive Baseline LLM Generation
@@ -389,7 +416,9 @@ def stream_compare_pipeline(payload: FullQAPipelineRequest) -> StreamingResponse
             if not entire_document_text:
                 all_docs = default_store.list_all_documents()
                 if all_docs:
-                    entire_document_text = "\n\n".join(d.content for d in all_docs if d.content)
+                    entire_document_text = "\n\n".join(
+                        d.content for d in all_docs if d.content
+                    )
 
             naive_res = default_grounded_generator.generate_naive(
                 query=payload.query,
@@ -418,10 +447,24 @@ def stream_compare_pipeline(payload: FullQAPipelineRequest) -> StreamingResponse
                 ),
             }
 
+            if payload.session_id:
+                default_memory_synchronizer.post_inference_sync(
+                    session_id=payload.session_id,
+                    query=payload.query,
+                    answer=full_grounded_answer,
+                    grounding_report=grounding_report,
+                    referenced_doc_ids=[
+                        chunk.document_id for chunk in ranked_context.chunks
+                    ],
+                )
+
             latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
             yield f"event: done\ndata: {json.dumps({'model': getattr(engine, 'model_name', 'Auto-Fallback'), 'provider': getattr(engine, 'last_used_name', 'Auto-Fallback'), 'citations': citations, 'latency_ms': latency_ms, 'metrics_comparison': metrics_comp})}\n\n"
         except Exception as exc:
-            logger.error(f"[stream_compare_pipeline] Stream failed with error: {exc}", exc_info=True)
+            logger.error(
+                f"[stream_compare_pipeline] Stream failed with error: {exc}",
+                exc_info=True,
+            )
             yield f"event: error\ndata: {json.dumps({'error': str(exc)})}\n\n"
 
     return StreamingResponse(
@@ -452,5 +495,3 @@ def get_generation_status() -> dict[str, Any]:
         "abstention_protocol": "enabled",
         "nli_verification": "sentence-level",
     }
-
-

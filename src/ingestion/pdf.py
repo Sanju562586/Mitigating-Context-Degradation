@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-import fitz  # PyMuPDF
+try:
+    import pymupdf as fitz
+except ImportError:
+    import fitz  # PyMuPDF fallback
 
 from src.ingestion.base import BaseParser
 from src.ingestion.models import Document, DocumentElement, DocumentType
@@ -45,7 +48,15 @@ class PDFParser(BaseParser):
         pdf_metadata: dict[str, Any] = {}
         try:
             raw_meta = doc.metadata or {}
-            for k in ("title", "author", "subject", "keywords", "creator", "producer", "format"):
+            for k in (
+                "title",
+                "author",
+                "subject",
+                "keywords",
+                "creator",
+                "producer",
+                "format",
+            ):
                 if val := raw_meta.get(k):
                     pdf_metadata[k] = val
         except Exception:
@@ -80,7 +91,9 @@ class PDFParser(BaseParser):
                                 page_number=page_num,
                                 metadata={
                                     "bbox": block[:4] if len(block) >= 4 else None,
-                                    "block_number": block[5] if len(block) >= 6 else None,
+                                    "block_number": block[5]
+                                    if len(block) >= 6
+                                    else None,
                                 },
                             )
                         )
@@ -103,7 +116,9 @@ class PDFParser(BaseParser):
                     el_idx += 1
 
             if page_text_parts:
-                full_text_parts.append(f"--- Page {page_num} ---\n" + "\n\n".join(page_text_parts))
+                full_text_parts.append(
+                    f"--- Page {page_num} ---\n" + "\n\n".join(page_text_parts)
+                )
 
         doc.close()
 

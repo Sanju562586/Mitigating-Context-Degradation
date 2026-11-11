@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
+from src.ingestion.store import default_store
 from src.memory.models import (
     EpisodicMemoryItem,
     HierarchicalSummary,
@@ -26,16 +27,34 @@ from src.memory.synchronizer import default_memory_synchronizer
 router = APIRouter(prefix="/api/memory", tags=["Cross-Session External Memory & Sync"])
 
 
+def _validate_documents(document_ids: list[str]) -> list[str]:
+    if any(default_store.get(document_id) is None for document_id in document_ids):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="One or more documents were not found.",
+        )
+    return document_ids
+
+
+def _validate_session(session_id: str) -> None:
+    if default_session_registry.get_session(session_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session with ID '{session_id}' not found.",
+        )
+
+
 class CreateSessionRequest(BaseModel):
     """Payload to create a new conversational session."""
 
     title: str = Field(default="New Session", description="Session title.")
-    user_id: str = Field(default="default_user", description="User profile identifier.")
     active_document_ids: list[str] = Field(
         default_factory=list,
         description="Optional active document IDs to associate with this session.",
     )
-    metadata: dict[str, Any] = Field(default_factory=dict, description="Session metadata.")
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, description="Session metadata."
+    )
 
 
 class UpdateSessionRequest(BaseModel):
@@ -81,7 +100,6 @@ class PostInferenceSyncRequest(BaseModel):
         default_factory=lambda: ["qa_interaction"],
         description="Categorical tags.",
     )
-    user_id: str = Field(default="default_user", description="User identifier.")
 
 
 # =============================================================================
@@ -96,11 +114,10 @@ class PostInferenceSyncRequest(BaseModel):
     summary="List all conversational sessions",
 )
 def list_sessions(
-    user_id: str | None = Query(default=None, description="Filter by user ID"),
     is_active: bool | None = Query(default=None, description="Filter by active status"),
 ) -> list[Session]:
     """Retrieve all sessions ordered by most recently updated."""
-    return default_session_registry.list_sessions(user_id=user_id, is_active=is_active)
+    return default_session_registry.list_sessions(is_active=is_active)
 
 
 @router.post(
@@ -112,9 +129,8 @@ def list_sessions(
 def create_session(payload: CreateSessionRequest) -> Session:
     """Create a new conversational session with default permissions."""
     return default_session_registry.create_session(
-        user_id=payload.user_id,
         title=payload.title,
-        active_document_ids=payload.active_document_ids,
+        active_document_ids=_validate_documents(payload.active_document_ids),
         metadata=payload.metadata,
     )
 
@@ -127,7 +143,9 @@ def create_session(payload: CreateSessionRequest) -> Session:
 )
 def get_session_details(session_id: str) -> SessionDetailsResponse:
     """Fetch session metadata, permissions, episodic turns, and summaries."""
-    session, turns, summaries = default_session_registry.inspect_session_memory(session_id)
+    session, turns, summaries = default_session_registry.inspect_session_memory(
+        session_id
+    )
     if not session:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -150,6 +168,10 @@ def get_session_details(session_id: str) -> SessionDetailsResponse:
 )
 def update_session(session_id: str, payload: UpdateSessionRequest) -> Session:
     """Update mutable attributes of a session."""
+    if payload.active_document_ids is not None:
+        payload.active_document_ids = _validate_documents(
+            payload.active_document_ids
+        )
     updated = default_session_registry.update_session(
         session_id=session_id,
         title=payload.title,
@@ -297,10 +319,11 @@ def export_session_memory(
 )
 def search_memory(payload: MemorySearchQuery) -> MemorySearchResult:
     """Search past episodic interaction turns and summaries by semantic similarity."""
+    if payload.session_id:
+        _validate_session(payload.session_id)
     memories, scores = default_memory_store.search_memories(
         query=payload.query,
         session_id=payload.session_id,
-        user_id=payload.user_id,
         top_k=payload.top_k,
         min_similarity=payload.min_similarity,
     )
@@ -331,6 +354,8 @@ def search_memory(payload: MemorySearchQuery) -> MemorySearchResult:
 )
 def capture_web_context(payload: WebContextCaptureRequest) -> EpisodicMemoryItem:
     """Ingest highlighted web text, URL, and page title directly into session memory."""
+    if payload.session_id:
+        _validate_session(payload.session_id)
     return default_memory_synchronizer.capture_web_context(payload)
 
 
@@ -343,14 +368,14 @@ def capture_web_context(payload: WebContextCaptureRequest) -> EpisodicMemoryItem
 def pre_inference_sync(
     query: str = Query(..., description="Current query"),
     session_id: str | None = Query(default=None, description="Session ID"),
-    user_id: str = Query(default="default_user", description="User ID"),
     max_tokens: int | None = Query(default=None, description="Max token budget"),
 ) -> MemorySyncContext:
     """Preview or retrieve the compact memory block that will be injected before inference."""
+    if session_id:
+        _validate_session(session_id)
     return default_memory_synchronizer.pre_inference_sync(
         query=query,
         session_id=session_id,
-        user_id=user_id,
         max_tokens=max_tokens,
     )
 
@@ -363,6 +388,7 @@ def pre_inference_sync(
 )
 def post_inference_sync(payload: PostInferenceSyncRequest) -> EpisodicMemoryItem:
     """Store verified interaction turn into external episodic memory."""
+    _validate_session(payload.session_id)
     item = default_memory_synchronizer.post_inference_sync(
         session_id=payload.session_id,
         query=payload.query,
@@ -370,7 +396,6 @@ def post_inference_sync(payload: PostInferenceSyncRequest) -> EpisodicMemoryItem
         intent=payload.intent,
         referenced_doc_ids=payload.referenced_doc_ids,
         tags=payload.tags,
-        user_id=payload.user_id,
     )
     if not item:
         raise HTTPException(
@@ -386,16 +411,20 @@ def post_inference_sync(payload: PostInferenceSyncRequest) -> EpisodicMemoryItem
     summary="Get status and telemetry of external memory store",
 )
 def get_memory_status() -> dict[str, Any]:
-    """Retrieve memory status, active session counts, and storage directories."""
+    """Retrieve memory status and counts for the shared workspace."""
     sessions = default_memory_store.list_sessions()
     active_sessions = [s for s in sessions if s.is_active]
     return {
         "status": "ready",
         "module": "Cross-Session External Memory & Client Sync",
-        "storage_dir": str(default_memory_store.storage_dir),
-        "database_file": str(default_memory_store.db_path),
         "total_sessions": len(sessions),
         "active_sessions": len(active_sessions),
-        "indexed_memory_vectors": len(default_memory_store._memory_vectors),
-        "indexed_summary_vectors": len(default_memory_store._summary_vectors),
+        "memory_turns": sum(
+            len(default_memory_store.list_session_memories(s.session_id))
+            for s in sessions
+        ),
+        "summaries": sum(
+            len(default_memory_store.list_session_summaries(s.session_id))
+            for s in sessions
+        ),
     }

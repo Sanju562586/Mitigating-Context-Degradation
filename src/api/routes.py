@@ -15,26 +15,37 @@ router = APIRouter(prefix="/api/ingest", tags=["Ingestion"])
 
 class RawTextInput(BaseModel):
     """Schema for direct text/markdown ingestion."""
-    title: str = Field(default="untitled.txt", description="Document title or pseudo-filename")
+
+    title: str = Field(
+        default="untitled.txt", description="Document title or pseudo-filename"
+    )
     content: str = Field(..., description="Raw text or markdown content")
     format: str = Field(default="txt", description="Format: 'txt', 'md', or 'html'")
     document_type: str | None = Field(
-        default=None, description="Optional explicit document type category (e.g. HR_POLICY, TECHNICAL_SPEC)"
+        default=None,
+        description="Optional explicit document type category (e.g. HR_POLICY, TECHNICAL_SPEC)",
     )
 
 
 class IngestResponse(BaseModel):
     """API response after successful ingestion."""
+
     success: bool = True
     document: Document
     message: str = "Document parsed and stored successfully"
     index_stats: dict | None = None
 
 
-@router.post("/upload", response_model=IngestResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/upload", response_model=IngestResponse, status_code=status.HTTP_201_CREATED
+)
 async def upload_document(
-    file: UploadFile = File(..., description="Document file to parse (PDF, DOCX, TXT, MD, HTML)"),
-    document_type: str | None = Form(None, description="Optional explicit document type (e.g. HR_POLICY)"),
+    file: UploadFile = File(
+        ..., description="Document file to parse (PDF, DOCX, TXT, MD, HTML)"
+    ),
+    document_type: str | None = Form(
+        None, description="Optional explicit document type (e.g. HR_POLICY)"
+    ),
 ) -> IngestResponse:
     """Upload and parse any supported document into the standardized Document format."""
     filename = file.filename or "uploaded_document"
@@ -78,7 +89,9 @@ async def upload_document(
         ) from exc
 
 
-@router.post("/text", response_model=IngestResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/text", response_model=IngestResponse, status_code=status.HTTP_201_CREATED
+)
 def ingest_text(payload: RawTextInput) -> IngestResponse:
     """Directly ingest raw text, Markdown, or HTML without a file upload."""
     if not payload.content.strip():
@@ -150,8 +163,9 @@ def get_document_chunks(doc_id: str) -> list[DocumentChunk]:
 
 @router.get("/indexes/stats")
 def get_index_stats() -> dict:
-    """Retrieve current status and telemetry of FAISS, BM25, and Metadata indexes."""
-    return default_index_manager.get_stats()
+    """Return indexed-document counts for the shared workspace."""
+    docs = default_store.list_all()
+    return {"documents": len(docs), "chunks": sum(d.chunk_count for d in docs)}
 
 
 @router.delete("/documents/{doc_id}")
@@ -165,4 +179,7 @@ def delete_document(doc_id: str) -> dict:
         )
     # Remove from FAISS, BM25, and Metadata Store
     default_index_manager.remove_document(doc_id)
-    return {"success": True, "message": f"Document '{doc_id}' deleted and unindexed successfully."}
+    return {
+        "success": True,
+        "message": f"Document '{doc_id}' deleted and unindexed successfully.",
+    }

@@ -52,7 +52,9 @@ class BM25Index:
             return
 
         for chunk in chunks:
-            chunk_id = chunk.metadata.get("chunk_id", chunk.id) if chunk.metadata else chunk.id
+            chunk_id = (
+                chunk.metadata.get("chunk_id", chunk.id) if chunk.metadata else chunk.id
+            )
             doc_id = chunk.document_id
 
             tokens = bm25_tokenize(chunk.content)
@@ -86,11 +88,15 @@ class BM25Index:
 
         query_set = set(query_tokens)
         results: list[tuple[str, float]] = []
-        for idx in top_indices[:top_k]:
+        for idx in top_indices:
+            if scores[idx] <= 0:
+                break
             # Ensure the document actually contains matching terms
             doc_tokens = set(self._tokenized_corpus[idx])
             if query_set.intersection(doc_tokens):
                 results.append((self._chunk_ids[idx], float(scores[idx])))
+                if len(results) >= top_k:
+                    break
 
         return results
 

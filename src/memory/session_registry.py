@@ -153,7 +153,6 @@ class SessionRegistry:
         md_lines = [
             f"# Session Memory Export: {session.title}",
             f"- **Session ID:** `{session.session_id}`",
-            f"- **User:** `{session.user_id}`",
             f"- **Created:** {session.created_at}",
             f"- **Total Turns:** {session.turn_count}",
             f"- **Active Documents:** {', '.join(session.active_document_ids) if session.active_document_ids else 'None'}",
@@ -174,7 +173,9 @@ class SessionRegistry:
         md_lines.append("## Chronological Episodic Interaction Turns")
         if turns:
             for t in turns:
-                md_lines.append(f"### Turn {t.turn_index + 1}: {t.query} [{t.timestamp}]")
+                md_lines.append(
+                    f"### Turn {t.turn_index + 1}: {t.query} [{t.timestamp}]"
+                )
                 if t.intent:
                     md_lines.append(f"- **Intent:** `{t.intent}`")
                 md_lines.append(f"- **Answer:** {t.answer}")

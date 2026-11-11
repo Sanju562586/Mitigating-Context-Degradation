@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from src.api.context_routes import router as context_router
+from src.api.evaluation_routes import router as evaluation_router
 from src.api.generation_routes import router as generation_router
 from src.api.memory_routes import router as memory_router
 from src.api.query_routes import router as query_router
@@ -26,7 +27,7 @@ logger = logging.getLogger("uvicorn.error")
 def create_app() -> FastAPI:
     """Factory creating configured FastAPI application."""
     app = FastAPI(
-        title="LLM Hallucination & Context Degradation Mitigation API",
+        title="Mitigating Context Degradation in LLMs Using External Memory and Hybrid Retrieval API",
         description="Backend API supporting multi-format document ingestion, hybrid retrieval, and context optimization.",
         version="0.1.0",
     )
@@ -34,9 +35,7 @@ def create_app() -> FastAPI:
     # Configure CORS origins safely
     origins_env = os.getenv("ALLOWED_ORIGINS", "")
     allowed_origins = [
-        origin.strip()
-        for origin in origins_env.split(",")
-        if origin.strip()
+        origin.strip() for origin in origins_env.split(",") if origin.strip()
     ] or [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
@@ -54,7 +53,6 @@ def create_app() -> FastAPI:
         if origin and (origin in allowed_origins or origin_regex.match(origin)):
             return {
                 "Access-Control-Allow-Origin": origin,
-                "Access-Control-Allow-Credentials": "true",
                 "Access-Control-Allow-Methods": "*",
                 "Access-Control-Allow-Headers": "*",
             }
@@ -72,7 +70,9 @@ def create_app() -> FastAPI:
         )
 
     @app.exception_handler(RequestValidationError)
-    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    async def validation_exception_handler(
+        request: Request, exc: RequestValidationError
+    ):
         headers = get_cors_headers(request)
         return JSONResponse(
             status_code=422,
@@ -82,7 +82,9 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):
-        logger.exception(f"Unhandled error on {request.method} {request.url.path}: {exc}")
+        logger.exception(
+            f"Unhandled error on {request.method} {request.url.path}: {exc}"
+        )
         headers = get_cors_headers(request)
         return JSONResponse(
             status_code=500,
@@ -94,11 +96,9 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=allowed_origins,
         allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$",
-        allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
-
     # Mount routes
     app.include_router(ingestion_router)
     app.include_router(query_router)
@@ -107,6 +107,7 @@ def create_app() -> FastAPI:
     app.include_router(context_router)
     app.include_router(generation_router)
     app.include_router(memory_router)
+    app.include_router(evaluation_router)
 
     @app.get("/api/health", tags=["Health"])
     def health_check():
