@@ -7,11 +7,10 @@ import logging
 import time
 from typing import Any
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from src.auth import current_user_id, owner_filters, require_owned_session
 from src.context.compactor import default_context_compactor
 from src.generation.generator import default_grounded_generator
 from src.generation.models import (
@@ -19,12 +18,21 @@ from src.generation.models import (
     GenerationRequest,
     GenerationResponse,
 )
+from src.memory.session_registry import default_session_registry
 from src.query_processing.models import ConversationTurn
 from src.reranking.reranker import default_reranker
 from src.retrieval.hybrid import default_hybrid_retriever
 
 router = APIRouter(prefix="/api/generate", tags=["Grounded Generation & Guardrails"])
 logger = logging.getLogger("uvicorn.error")
+
+
+def _validate_session(session_id: str) -> None:
+    if default_session_registry.get_session(session_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session with ID '{session_id}' not found.",
+        )
 
 
 class FullQAPipelineRequest(BaseModel):
@@ -155,13 +163,12 @@ def run_full_qa_pipeline(payload: FullQAPipelineRequest) -> GenerationResponse:
     # 0. Optional Module 7: Pre-Inference Memory Sync
     memory_context_str: str | None = None
     if payload.session_id:
-        require_owned_session(payload.session_id)
+        _validate_session(payload.session_id)
         from src.memory.synchronizer import default_memory_synchronizer
 
         sync_ctx = default_memory_synchronizer.pre_inference_sync(
             query=payload.query,
             session_id=payload.session_id,
-            user_id=current_user_id(),
         )
         if sync_ctx.read_enabled and sync_ctx.formatted_memory_context:
             memory_context_str = sync_ctx.formatted_memory_context
@@ -170,7 +177,7 @@ def run_full_qa_pipeline(payload: FullQAPipelineRequest) -> GenerationResponse:
     retrieval_res = default_hybrid_retriever.retrieve(
         query=payload.query,
         conversation_history=payload.conversation_history,
-        filters=owner_filters(payload.filters),
+        filters=payload.filters,
         top_k_fused=payload.top_k_fused,
     )
 
@@ -211,7 +218,6 @@ def run_full_qa_pipeline(payload: FullQAPipelineRequest) -> GenerationResponse:
             answer=response.answer,
             grounding_report=response.grounding_report,
             referenced_doc_ids=[c.document_id for c in ranked_context.chunks],
-            user_id=current_user_id(),
         )
 
     return response
@@ -237,14 +243,12 @@ def compare_naive_vs_grounded(payload: FullQAPipelineRequest) -> ComparisonRespo
 
     entire_document_text = ""
     if payload.filters and "document_id" in payload.filters:
-        doc = default_store.get(
-            payload.filters["document_id"], owner_id=current_user_id()
-        )
+        doc = default_store.get(payload.filters["document_id"])
         if doc and doc.content:
             entire_document_text = doc.content
 
     if not entire_document_text:
-        all_docs = default_store.list_all_documents(owner_id=current_user_id())
+        all_docs = default_store.list_all_documents()
         if all_docs:
             entire_document_text = "\n\n".join(d.content for d in all_docs if d.content)
 
@@ -290,11 +294,9 @@ def compare_naive_vs_grounded(payload: FullQAPipelineRequest) -> ComparisonRespo
 )
 def stream_compare_pipeline(payload: FullQAPipelineRequest) -> StreamingResponse:
     """Stream end-to-end question answering comparison with live token streaming and guardrail telemetry."""
-    owner_id = current_user_id()
     if payload.session_id:
-        require_owned_session(payload.session_id)
-    scoped_filters = dict(payload.filters or {})
-    scoped_filters["owner_id"] = owner_id
+        _validate_session(payload.session_id)
+
 
     def event_stream():
         start_time = time.perf_counter()
@@ -304,7 +306,7 @@ def stream_compare_pipeline(payload: FullQAPipelineRequest) -> StreamingResponse
             retrieval_res = default_hybrid_retriever.retrieve(
                 query=payload.query,
                 conversation_history=payload.conversation_history,
-                filters=scoped_filters,
+                filters=payload.filters,
                 top_k_fused=payload.top_k_fused,
             )
 
@@ -343,7 +345,6 @@ def stream_compare_pipeline(payload: FullQAPipelineRequest) -> StreamingResponse
                 sync_ctx = default_memory_synchronizer.pre_inference_sync(
                     query=payload.query,
                     session_id=payload.session_id,
-                    user_id=owner_id,
                 )
                 if sync_ctx.read_enabled and sync_ctx.formatted_memory_context:
                     memory_context_str = sync_ctx.formatted_memory_context
@@ -376,6 +377,10 @@ def stream_compare_pipeline(payload: FullQAPipelineRequest) -> StreamingResponse
                         memory_context=memory_context_str,
                     )
                 )
+                yield (
+                    "event: context\n"
+                    f"data: {json.dumps([item.model_dump() for item in compacted_context.evidence_items])}\n\n"
+                )
                 for token in engine.generate_stream(
                     prompt=prompt,
                     system_prompt=default_grounded_generator.prompt_synthesizer.system_prompt,
@@ -405,13 +410,11 @@ def stream_compare_pipeline(payload: FullQAPipelineRequest) -> StreamingResponse
 
             entire_document_text = ""
             if payload.filters and "document_id" in payload.filters:
-                doc = default_store.get(
-                    payload.filters["document_id"], owner_id=owner_id
-                )
+                doc = default_store.get(payload.filters["document_id"])
                 if doc and doc.content:
                     entire_document_text = doc.content
             if not entire_document_text:
-                all_docs = default_store.list_all_documents(owner_id=owner_id)
+                all_docs = default_store.list_all_documents()
                 if all_docs:
                     entire_document_text = "\n\n".join(
                         d.content for d in all_docs if d.content
@@ -453,7 +456,6 @@ def stream_compare_pipeline(payload: FullQAPipelineRequest) -> StreamingResponse
                     referenced_doc_ids=[
                         chunk.document_id for chunk in ranked_context.chunks
                     ],
-                    user_id=owner_id,
                 )
 
             latency_ms = round((time.perf_counter() - start_time) * 1000, 2)

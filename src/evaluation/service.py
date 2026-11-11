@@ -11,7 +11,6 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
-from src.auth import current_user_id
 from src.chunking.tokenizer import count_tokens
 from src.context.compactor import default_context_compactor
 from src.evaluation.benchmark import citation_scores, qa_scores, retrieval_metrics
@@ -138,11 +137,7 @@ def _evaluate(
     for case_index, case in enumerate(request.cases):
         query_id = case.id or f"q{case_index + 1}"
         query = case.query
-        filters = (
-            {"document_id": case.document_id, "owner_id": current_user_id()}
-            if case.document_id
-            else {"owner_id": current_user_id()}
-        )
+        filters = {"document_id": case.document_id} if case.document_id else {}
         bm_start = time.perf_counter()
         bm25 = default_hybrid_retriever.sparse_retriever.retrieve(
             query, top_k=10, filters=filters
@@ -320,42 +315,42 @@ def _evaluate(
         for full_method in full_methods:
             for baseline in ("Conventional RAG", "BM25 + Dense (RRF)"):
                 differences = []
-            for case_index, case in enumerate(request.cases):
-                key = case.id or f"q{case_index + 1}"
-                left, right = (
-                    indexed[(key, baseline)][metric],
-                    indexed[(key, full_method)][metric],
-                )
-                if left is not None and right is not None:
-                    differences.append(right - left)
-            if differences:
-                observed = statistics.mean(differences)
-                bootstrap = sorted(
-                    statistics.mean(rng.choices(differences, k=len(differences)))
-                    for _ in range(2000)
-                )
-                extreme = 0
-                for _ in range(5000):
-                    permuted = statistics.mean(
-                        value if rng.random() < 0.5 else -value for value in differences
+                for case_index, case in enumerate(request.cases):
+                    key = case.id or f"q{case_index + 1}"
+                    left, right = (
+                        indexed[(key, baseline)][metric],
+                        indexed[(key, full_method)][metric],
                     )
-                    extreme += abs(permuted) >= abs(observed)
-                paired.append(
-                    {
-                        "metric": metric,
-                        "comparison": f"{full_method} - {baseline}",
-                        "n_paired_queries": len(differences),
-                        "mean_difference": observed,
-                        "std_difference": statistics.stdev(differences)
-                        if len(differences) > 1
-                        else 0.0,
-                        "bootstrap_95ci_low": bootstrap[49],
-                        "bootstrap_95ci_high": bootstrap[1949],
-                        "permutation_p_two_sided": (extreme + 1) / 5001,
-                        "bootstrap_resamples": 2000,
-                        "permutation_resamples": 5000,
-                    }
-                )
+                    if left is not None and right is not None:
+                        differences.append(right - left)
+                if differences:
+                    observed = statistics.mean(differences)
+                    bootstrap = sorted(
+                        statistics.mean(rng.choices(differences, k=len(differences)))
+                        for _ in range(2000)
+                    )
+                    extreme = 0
+                    for _ in range(5000):
+                        permuted = statistics.mean(
+                            value if rng.random() < 0.5 else -value for value in differences
+                        )
+                        extreme += abs(permuted) >= abs(observed)
+                    paired.append(
+                        {
+                            "metric": metric,
+                            "comparison": f"{full_method} - {baseline}",
+                            "n_paired_queries": len(differences),
+                            "mean_difference": observed,
+                            "std_difference": statistics.stdev(differences)
+                            if len(differences) > 1
+                            else 0.0,
+                            "bootstrap_95ci_low": bootstrap[49],
+                            "bootstrap_95ci_high": bootstrap[1949],
+                            "permutation_p_two_sided": (extreme + 1) / 5001,
+                            "bootstrap_resamples": 2000,
+                            "permutation_resamples": 5000,
+                        }
+                    )
     try:
         import torch
 

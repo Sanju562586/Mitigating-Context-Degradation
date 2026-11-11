@@ -7,7 +7,6 @@ from typing import Any
 from fastapi import APIRouter, status
 from pydantic import BaseModel, Field
 
-from src.auth import owner_filters
 from src.query_processing.models import ConversationTurn
 from src.reranking.models import RankedContext, RerankingRequest
 from src.reranking.reranker import default_reranker
@@ -73,7 +72,7 @@ def hybrid_retrieve_and_rerank(payload: HybridAndRerankRequest) -> RankedContext
     retrieval_response = default_hybrid_retriever.retrieve(
         query=payload.query,
         conversation_history=payload.conversation_history,
-        filters=owner_filters(payload.filters),
+        filters=payload.filters,
         top_k_fused=payload.top_k_fused,
     )
     return default_reranker.rerank_retrieval_response(

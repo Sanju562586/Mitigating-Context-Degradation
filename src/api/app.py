@@ -5,12 +5,11 @@ import os
 import re
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from src.api.auth_routes import router as auth_router
 from src.api.context_routes import router as context_router
 from src.api.evaluation_routes import router as evaluation_router
 from src.api.generation_routes import router as generation_router
@@ -19,7 +18,6 @@ from src.api.query_routes import router as query_router
 from src.api.rerank_routes import router as rerank_router
 from src.api.retrieval_routes import router as retrieval_router
 from src.api.routes import router as ingestion_router
-from src.auth import UserContextMiddleware, authenticated_user
 from src.ingestion.registry import default_registry
 
 load_dotenv()
@@ -55,7 +53,6 @@ def create_app() -> FastAPI:
         if origin and (origin in allowed_origins or origin_regex.match(origin)):
             return {
                 "Access-Control-Allow-Origin": origin,
-                "Access-Control-Allow-Credentials": "true",
                 "Access-Control-Allow-Methods": "*",
                 "Access-Control-Allow-Headers": "*",
             }
@@ -99,23 +96,18 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=allowed_origins,
         allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$",
-        allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    app.add_middleware(UserContextMiddleware)
-
     # Mount routes
-    app.include_router(auth_router)
-    protected = [Depends(authenticated_user)]
-    app.include_router(ingestion_router, dependencies=protected)
-    app.include_router(query_router, dependencies=protected)
-    app.include_router(retrieval_router, dependencies=protected)
-    app.include_router(rerank_router, dependencies=protected)
-    app.include_router(context_router, dependencies=protected)
-    app.include_router(generation_router, dependencies=protected)
-    app.include_router(memory_router, dependencies=protected)
-    app.include_router(evaluation_router, dependencies=protected)
+    app.include_router(ingestion_router)
+    app.include_router(query_router)
+    app.include_router(retrieval_router)
+    app.include_router(rerank_router)
+    app.include_router(context_router)
+    app.include_router(generation_router)
+    app.include_router(memory_router)
+    app.include_router(evaluation_router)
 
     @app.get("/api/health", tags=["Health"])
     def health_check():
@@ -136,4 +128,3 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run("src.api.app:app", host="127.0.0.1", port=8000, reload=True)
-

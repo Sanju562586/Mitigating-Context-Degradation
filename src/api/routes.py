@@ -5,7 +5,6 @@ from __future__ import annotations
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 
-from src.auth import current_user_id
 from src.indexing.manager import default_index_manager
 from src.ingestion.models import Document, DocumentChunk, DocumentMetadata
 from src.ingestion.registry import UnsupportedFormatError, default_registry
@@ -66,13 +65,11 @@ async def upload_document(
             file_size_bytes=len(content_bytes),
             document_type=document_type,
         )
-        owner_id = current_user_id()
-        default_store.assign_owner(doc, owner_id)
         # Index chunks: Sentence-Transformers L2 embeddings -> FAISS + BM25 + Metadata Store
         idx_res = default_index_manager.index_document(doc)
         # Publish the document only after indexing succeeds, so a failed request
         # cannot leave a document that retrieval cannot find.
-        default_store.add(doc, owner_id=owner_id)
+        default_store.add(doc)
 
         return IngestResponse(
             success=True,
@@ -117,11 +114,9 @@ def ingest_text(payload: RawTextInput) -> IngestResponse:
             file_size_bytes=len(content_bytes),
             document_type=payload.document_type,
         )
-        owner_id = current_user_id()
-        default_store.assign_owner(doc, owner_id)
         # Index chunks: Sentence-Transformers L2 embeddings -> FAISS + BM25 + Metadata Store
         idx_res = default_index_manager.index_document(doc)
-        default_store.add(doc, owner_id=owner_id)
+        default_store.add(doc)
 
         return IngestResponse(
             success=True,
@@ -139,13 +134,13 @@ def ingest_text(payload: RawTextInput) -> IngestResponse:
 @router.get("/documents", response_model=list[DocumentMetadata])
 def list_documents() -> list[DocumentMetadata]:
     """Retrieve metadata for all ingested documents."""
-    return default_store.list_all(owner_id=current_user_id())
+    return default_store.list_all()
 
 
 @router.get("/documents/{doc_id}", response_model=Document)
 def get_document(doc_id: str) -> Document:
     """Retrieve a specific document by its unique ID."""
-    doc = default_store.get(doc_id, owner_id=current_user_id())
+    doc = default_store.get(doc_id)
     if not doc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -157,7 +152,7 @@ def get_document(doc_id: str) -> Document:
 @router.get("/documents/{doc_id}/chunks", response_model=list[DocumentChunk])
 def get_document_chunks(doc_id: str) -> list[DocumentChunk]:
     """Retrieve all semantic chunks and tagged metadata for a specific document."""
-    doc = default_store.get(doc_id, owner_id=current_user_id())
+    doc = default_store.get(doc_id)
     if not doc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -168,16 +163,15 @@ def get_document_chunks(doc_id: str) -> list[DocumentChunk]:
 
 @router.get("/indexes/stats")
 def get_index_stats() -> dict:
-    """Return only the authenticated user's indexed-document counts."""
-    docs = default_store.list_all(owner_id=current_user_id())
+    """Return indexed-document counts for the shared workspace."""
+    docs = default_store.list_all()
     return {"documents": len(docs), "chunks": sum(d.chunk_count for d in docs)}
 
 
 @router.delete("/documents/{doc_id}")
 def delete_document(doc_id: str) -> dict:
     """Delete a document by its unique ID and remove from all indexes."""
-    owner_id = current_user_id()
-    deleted = default_store.delete(doc_id, owner_id=owner_id)
+    deleted = default_store.delete(doc_id)
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

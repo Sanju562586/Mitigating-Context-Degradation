@@ -1,29 +1,30 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
+import { Activity, Brain, FileText, MessageSquare, Search } from "lucide-react";
 import { CrossSessionMemory } from "@/components/CrossSessionMemory";
+import { DocumentInspector } from "@/components/DocumentInspector";
+import { DocumentList } from "@/components/DocumentList";
+import { EvaluationWorkbench } from "@/components/EvaluationWorkbench";
 import { GroundedQA } from "@/components/GroundedQA";
 import { Navbar } from "@/components/Navbar";
-import { UploadZone } from "@/components/UploadZone";
-import { DocumentList } from "@/components/DocumentList";
-import { DocumentInspector } from "@/components/DocumentInspector";
-import { EvaluationWorkbench } from "@/components/EvaluationWorkbench";
-import { AuthPanel } from "@/components/AuthPanel";
+import { RetrievedContext } from "@/components/RetrievedContext";
 import { Toast, ToastMessage } from "@/components/Toast";
 import {
   checkHealth,
+  CompactedEvidence,
   deleteDocumentById,
   fetchDocumentById,
   fetchDocuments,
 } from "@/lib/api";
-import { AuthProfile, getSavedAuth, saveAuth } from "@/lib/api";
 import { Document, DocumentMetadata, HealthStatus } from "@/types/ingestion";
-import { Activity, Brain, FileText, MessageSquareQuote } from "lucide-react";
+
+type MainTab = "ask" | "tools" | "context";
+type ToolsTab = "documents" | "memory" | "evaluate";
 
 export default function IngestionPage() {
-  const [auth, setAuth] = useState<AuthProfile | null>(null);
-  const [authReady, setAuthReady] = useState(false);
-  const [activeTab, setActiveTab] = useState<"ingestion" | "qa" | "memory" | "evaluation">("qa");
+  const [activeTab, setActiveTab] = useState<MainTab>("ask");
+  const [toolsTab, setToolsTab] = useState<ToolsTab>("documents");
   const [backendHealth, setBackendHealth] = useState<HealthStatus | null>(null);
   const [healthError, setHealthError] = useState(false);
   const [documents, setDocuments] = useState<DocumentMetadata[]>([]);
@@ -31,28 +32,11 @@ export default function IngestionPage() {
   const [selectedDoc, setSelectedDoc] = useState<Document | null>(null);
   const [isLoadingDocs, setIsLoadingDocs] = useState(false);
   const [isLoadingSelected, setIsLoadingSelected] = useState(false);
+  const [contextQuery, setContextQuery] = useState("");
+  const [contextEvidence, setContextEvidence] = useState<CompactedEvidence[]>([]);
   const [toast, setToast] = useState<ToastMessage | null>(null);
 
-  useEffect(() => {
-    setAuth(getSavedAuth());
-    setAuthReady(true);
-  }, []);
-
-  useEffect(() => {
-    const expireSession = () => {
-      saveAuth(null);
-      setAuth(null);
-      setDocuments([]);
-      setSelectedDocId(null);
-      setSelectedDoc(null);
-    };
-    window.addEventListener("auth-expired", expireSession);
-    return () => window.removeEventListener("auth-expired", expireSession);
-  }, []);
-
-  // Poll / check backend health & initial docs
   const loadHealthAndDocs = useCallback(async () => {
-    if (!auth) return;
     try {
       const health = await checkHealth();
       setBackendHealth(health);
@@ -66,23 +50,20 @@ export default function IngestionPage() {
       setIsLoadingDocs(true);
       const docs = await fetchDocuments();
       setDocuments(docs);
-      if (docs.length > 0 && !selectedDocId) {
-        setSelectedDocId(docs[0].document_id);
-      }
+      if (docs.length > 0 && !selectedDocId) setSelectedDocId(docs[0].document_id);
     } catch {
-      // Backend may not be reachable initially
+      // The health indicator communicates backend availability.
     } finally {
       setIsLoadingDocs(false);
     }
-  }, [selectedDocId, auth]);
+  }, [selectedDocId]);
 
   useEffect(() => {
-    if (!authReady || !auth) return;
-    loadHealthAndDocs();
+    void loadHealthAndDocs();
     const interval = setInterval(() => {
       checkHealth()
-        .then((h) => {
-          setBackendHealth(h);
+        .then((health) => {
+          setBackendHealth(health);
           setHealthError(false);
         })
         .catch(() => {
@@ -91,211 +72,162 @@ export default function IngestionPage() {
         });
     }, 10000);
     return () => clearInterval(interval);
-  }, [loadHealthAndDocs, authReady, auth]);
+  }, [loadHealthAndDocs]);
 
-  // Fetch full document when selectedDocId changes
   useEffect(() => {
     if (!selectedDocId) {
       setSelectedDoc(null);
       return;
     }
-
     let isMounted = true;
     setIsLoadingSelected(true);
     fetchDocumentById(selectedDocId)
-      .then((doc) => {
-        if (isMounted) setSelectedDoc(doc);
+      .then((document) => {
+        if (isMounted) setSelectedDoc(document);
       })
-      .catch((err) => {
-        console.error(err);
-      })
+      .catch((error) => console.error(error))
       .finally(() => {
         if (isMounted) setIsLoadingSelected(false);
       });
-
     return () => {
       isMounted = false;
     };
   }, [selectedDocId]);
 
-  const handleIngestSuccess = (doc: Document) => {
-    setDocuments((prev) => [doc.metadata, ...prev.filter((d) => d.document_id !== doc.id)]);
-    setSelectedDocId(doc.id);
-    setSelectedDoc(doc);
+  const handleIngestSuccess = (document: Document) => {
+    setDocuments((current) => [
+      document.metadata,
+      ...current.filter((item) => item.document_id !== document.id),
+    ]);
+    setSelectedDocId(document.id);
+    setSelectedDoc(document);
     setToast({
       id: String(Date.now()),
-      title: "Document Ingested",
-      description: `Document processed successfully with ${doc.chunks?.length || 0} chunks ready for retrieval.`,
+      title: "Document uploaded",
+      description: `${document.metadata.source_name} is ready to search.`,
       type: "success",
     });
   };
 
-  const handleDeleteDocument = async (docId: string) => {
+  const handleDeleteDocument = async (documentId: string) => {
     try {
-      await deleteDocumentById(docId);
-      setDocuments((prev) => prev.filter((d) => d.document_id !== docId));
-      if (selectedDocId === docId) {
-        const remaining = documents.filter((d) => d.document_id !== docId);
-        if (remaining.length > 0) {
-          setSelectedDocId(remaining[0].document_id);
-        } else {
-          setSelectedDocId(null);
-          setSelectedDoc(null);
-        }
+      await deleteDocumentById(documentId);
+      const remaining = documents.filter((item) => item.document_id !== documentId);
+      setDocuments(remaining);
+      if (selectedDocId === documentId) {
+        setSelectedDocId(remaining[0]?.document_id ?? null);
       }
+    } catch (error) {
       setToast({
         id: String(Date.now()),
-        title: "Document Removed",
-        description: `The document has been removed from the repository.`,
-        type: "info",
+        title: "Could not remove document",
+        description: error instanceof Error ? error.message : "Please try again.",
+        type: "error",
       });
-    } catch (err) {
-      alert("Failed to delete document: " + err);
     }
   };
 
-  const handleLogout = () => {
-    saveAuth(null);
-    setAuth(null);
-    setDocuments([]);
-    setSelectedDoc(null);
-    setSelectedDocId(null);
+  const showContext = (query: string, evidence: CompactedEvidence[]) => {
+    setContextQuery(query);
+    setContextEvidence(evidence);
   };
 
-  if (!authReady) {
-    return <div className="flex min-h-screen items-center justify-center bg-slate-950 text-sm text-slate-400">Loading secure workspace…</div>;
-  }
-  if (!auth) {
-    return <AuthPanel onAuthenticated={(profile) => { saveAuth(profile); setAuth(profile); }} />;
-  }
+  const mainTabs: { id: MainTab; label: string; icon: React.ReactNode }[] = [
+    { id: "ask", label: "Ask", icon: <MessageSquare className="h-4 w-4" /> },
+    { id: "tools", label: "Documents & tools", icon: <FileText className="h-4 w-4" /> },
+    { id: "context", label: "Retrieved chunks", icon: <Search className="h-4 w-4" /> },
+  ];
+
+  const toolTabs: { id: ToolsTab; label: string; icon: React.ReactNode }[] = [
+    { id: "documents", label: "Documents", icon: <FileText className="h-4 w-4" /> },
+    { id: "memory", label: "Memory", icon: <Brain className="h-4 w-4" /> },
+    { id: "evaluate", label: "Evaluate", icon: <Activity className="h-4 w-4" /> },
+  ];
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-indigo-500/30">
-      {/* Transient Toast Notification */}
+    <div className="flex min-h-screen flex-col bg-slate-950 font-sans text-slate-100">
       <Toast toast={toast} onDismiss={() => setToast(null)} />
+      <Navbar backendHealth={backendHealth} healthError={healthError} />
 
-      {/* Top Navbar */}
-      <Navbar backendHealth={backendHealth} healthError={healthError} username={auth.username} onLogout={handleLogout} />
-
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-8 space-y-8">
-        {/* Page Header & Tabs */}
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-slate-900 pb-5">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">
-              {activeTab === "qa"
-                ? "LLM Hallucination Mitigation"
-                : activeTab === "ingestion"
-                ? "Document Repository"
-                : activeTab === "memory"
-                ? "Cross-Session Memory"
-                : "Research Evaluation"}
-            </h1>
-            <p className="mt-1 text-sm text-slate-400">
-              {activeTab === "qa"
-                ? "Side-by-side comparison of Naive LLM vs. Our Grounded Application."
-                : activeTab === "ingestion"
-                ? "Upload and manage source documents, chunks, and metadata."
-                : activeTab === "memory"
-                ? "Inspect cross-session memory synchronization and summaries."
-                : "Run annotated metric evaluations against the live application pipeline."}
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2 bg-slate-900/90 border border-slate-800 p-1 rounded-xl">
+      <main className="mx-auto w-full max-w-7xl flex-1 space-y-6 px-4 py-6 sm:px-6">
+        <nav aria-label="Main navigation" className="flex gap-2 border-b border-slate-800">
+          {mainTabs.map((tab) => (
             <button
-              onClick={() => setActiveTab("qa")}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium transition ${
-                activeTab === "qa"
-                  ? "bg-indigo-600 text-white shadow-sm"
-                  : "text-slate-400 hover:text-slate-200"
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              aria-current={activeTab === tab.id ? "page" : undefined}
+              className={`inline-flex items-center gap-2 border-b-2 px-4 py-3 text-sm transition ${
+                activeTab === tab.id
+                  ? "border-indigo-500 text-white"
+                  : "border-transparent text-slate-400 hover:text-slate-200"
               }`}
             >
-              <MessageSquareQuote className="w-4 h-4" />
-              Comparison
+              {tab.icon}
+              {tab.label}
             </button>
-            <button
-              onClick={() => setActiveTab("ingestion")}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium transition ${
-                activeTab === "ingestion"
-                  ? "bg-indigo-600 text-white shadow-sm"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              <FileText className="w-4 h-4" />
-              Documents
-            </button>
-            <button
-              onClick={() => setActiveTab("memory")}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium transition ${
-                activeTab === "memory"
-                  ? "bg-indigo-600 text-white shadow-sm"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              <Brain className="w-4 h-4" />
-              Memory
-            </button>
-            <button
-              onClick={() => setActiveTab("evaluation")}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium transition ${
-                activeTab === "evaluation"
-                  ? "bg-indigo-600 text-white shadow-sm"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              <Activity className="w-4 h-4" />
-              Evaluate
-            </button>
-          </div>
-        </div>
+          ))}
+        </nav>
 
-        {activeTab === "qa" ? (
+        {activeTab === "ask" && (
           <GroundedQA
             documents={documents}
             selectedDocId={selectedDocId}
             onSelectDocId={setSelectedDocId}
             onUploadSuccess={handleIngestSuccess}
+            onContext={showContext}
           />
-        ) : activeTab === "memory" ? (
-          <CrossSessionMemory />
-        ) : activeTab === "evaluation" ? (
-          <EvaluationWorkbench document={selectedDoc} documentId={selectedDocId} />
-        ) : (
-          <>
-            {/* Upload Zone */}
-            <UploadZone onIngestSuccess={handleIngestSuccess} />
+        )}
 
-            {/* Repository & Deep Inspector Split View */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-              {/* Document List Sidebar (4 cols) */}
-              <div className="lg:col-span-4">
-                <DocumentList
-                  documents={documents}
-                  selectedDocId={selectedDocId}
-                  onSelectDocument={setSelectedDocId}
-                  onDeleteDocument={handleDeleteDocument}
-                  onRefresh={loadHealthAndDocs}
-                  isLoading={isLoadingDocs}
-                />
-              </div>
+        {activeTab === "tools" && (
+          <section className="space-y-5">
+            <nav aria-label="Documents and tools" className="flex gap-2">
+              {toolTabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setToolsTab(tab.id)}
+                  aria-current={toolsTab === tab.id ? "page" : undefined}
+                  className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm ${
+                    toolsTab === tab.id
+                      ? "bg-slate-800 text-white"
+                      : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
+                  }`}
+                >
+                  {tab.icon}
+                  {tab.label}
+                </button>
+              ))}
+            </nav>
 
-              {/* Deep Document Inspector (8 cols) */}
-              <div className="lg:col-span-8">
-                <DocumentInspector
-                  document={selectedDoc}
-                  isLoading={isLoadingSelected}
-                />
+            {toolsTab === "documents" && (
+              <div className="grid items-start gap-5 lg:grid-cols-12">
+                <div className="lg:col-span-4">
+                  <DocumentList
+                    documents={documents}
+                    selectedDocId={selectedDocId}
+                    onSelectDocument={setSelectedDocId}
+                    onDeleteDocument={handleDeleteDocument}
+                    onRefresh={loadHealthAndDocs}
+                    isLoading={isLoadingDocs}
+                  />
+                </div>
+                <div className="lg:col-span-8">
+                  <DocumentInspector document={selectedDoc} isLoading={isLoadingSelected} />
+                </div>
               </div>
-            </div>
-          </>
+            )}
+            {toolsTab === "memory" && <CrossSessionMemory />}
+            {toolsTab === "evaluate" && (
+              <EvaluationWorkbench document={selectedDoc} documentId={selectedDocId} />
+            )}
+          </section>
+        )}
+
+        {activeTab === "context" && (
+          <RetrievedContext query={contextQuery} evidence={contextEvidence} />
         )}
       </main>
-
-      {/* Footer */}
-      <footer className="border-t border-slate-900 bg-slate-950/60 py-5 text-center text-xs text-slate-500">
-        <p>Mitigating Hallucination and Context Degradation in LLMs • Major Project</p>
-      </footer>
     </div>
   );
 }

@@ -1,53 +1,10 @@
 import { Document, DocumentMetadata, HealthStatus, IngestApiResponse } from "@/types/ingestion";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
-const AUTH_TOKEN_KEY = "mitigating-context-access-token";
-const AUTH_USER_KEY = "mitigating-context-user";
-
-export interface AuthProfile { user_id: string; username: string; access_token: string; token_type: string }
-
-export function getSavedAuth(): AuthProfile | null {
-  if (typeof window === "undefined") return null;
-  const raw = localStorage.getItem(AUTH_USER_KEY);
-  try { return raw ? JSON.parse(raw) as AuthProfile : null; } catch { return null; }
-}
-
-export function saveAuth(profile: AuthProfile | null): void {
-  if (typeof window === "undefined") return;
-  if (profile) {
-    localStorage.setItem(AUTH_TOKEN_KEY, profile.access_token);
-    localStorage.setItem(AUTH_USER_KEY, JSON.stringify(profile));
-  } else {
-    localStorage.removeItem(AUTH_TOKEN_KEY);
-    localStorage.removeItem(AUTH_USER_KEY);
-  }
-}
 
 async function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
-  const headers = new Headers(init.headers);
-  if (typeof window !== "undefined") {
-    const token = localStorage.getItem(AUTH_TOKEN_KEY);
-    if (token) headers.set("Authorization", `Bearer ${token}`);
-  }
-  const response = await fetch(input, { ...init, headers });
-  if (response.status === 401 && typeof window !== "undefined") {
-    window.dispatchEvent(new Event("auth-expired"));
-  }
-  return response;
+  return fetch(input, init);
 }
-
-async function authRequest(path: "register" | "login", username: string, password: string): Promise<AuthProfile> {
-  const res = await fetch(`${API_BASE_URL}/api/auth/${path}`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password }),
-  });
-  const body = await res.json().catch(() => ({ detail: res.statusText }));
-  if (!res.ok) throw new Error(body.detail || "Authentication failed");
-  return body as AuthProfile;
-}
-
-export const registerUser = (username: string, password: string) => authRequest("register", username, password);
-export const loginUser = (username: string, password: string) => authRequest("login", username, password);
 
 export interface EvaluationCase {
   id?: string;
@@ -265,6 +222,19 @@ export interface ComparisonResponse {
   metrics_comparison: Record<string, string | number | null>;
 }
 
+export interface CompactedEvidence {
+  citation_tag: string;
+  document_id: string;
+  chunk_id: string;
+  original_text: string;
+  extracted_text: string;
+  token_count: number;
+  original_token_count: number;
+  compression_ratio: number;
+  reorder_position: number;
+  metadata: Record<string, unknown>;
+}
+
 export async function submitQuestionComparison(
   query: string,
   sessionId?: string,
@@ -318,6 +288,7 @@ export interface StreamCompareCallbacks {
   onToken?: (token: string) => void;
   onGrounding?: (report: GroundingReport) => void;
   onNaive?: (naive: NaiveGenerationResponse) => void;
+  onContext?: (evidence: CompactedEvidence[]) => void;
   onDone?: (data: {
     model: string;
     provider: string;
@@ -408,6 +379,7 @@ export async function streamQuestionComparison(
         else if (eventType === "token") callbacks?.onToken?.(parsed.token);
         else if (eventType === "grounding") callbacks?.onGrounding?.(parsed);
         else if (eventType === "naive") callbacks?.onNaive?.(parsed);
+        else if (eventType === "context") callbacks?.onContext?.(parsed);
         else if (eventType === "done") callbacks?.onDone?.(parsed);
       } catch {
         // Skip unparseable malformed frames
@@ -470,7 +442,6 @@ export interface MemoryPermissions {
 
 export interface Session {
   session_id: string;
-  user_id: string;
   title: string;
   created_at: string;
   updated_at: string;
@@ -484,7 +455,6 @@ export interface Session {
 export interface EpisodicMemoryItem {
   memory_id: string;
   session_id: string;
-  user_id: string;
   turn_index: number;
   query: string;
   intent?: string;

@@ -26,6 +26,14 @@ def test_health_endpoint():
     assert ".docx" in data["supported_extensions"]
 
 
+def test_authentication_routes_are_not_exposed():
+    response = client.post(
+        "/api/auth/login",
+        json={"username": "user", "password": "password"},
+    )
+    assert response.status_code == 404
+
+
 def test_upload_txt_file():
     content = b"Line 1 text.\n\nLine 2 text."
     files = {"file": ("test_doc.txt", content, "text/plain")}

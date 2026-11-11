@@ -1,575 +1,229 @@
 "use client";
 
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { Loader2, Send, UploadCloud } from "lucide-react";
 import {
-  ComparisonResponse,
-  GroundedAnswerResponse,
-  GroundingReport,
-  NaiveGenerationResponse,
-  SufficiencyAssessment,
-  Session,
-  EpisodicMemoryItem,
+  CompactedEvidence,
   createSession,
-  fetchSessionDetails,
   fetchSessions,
+  NaiveGenerationResponse,
   streamQuestionComparison,
 } from "@/lib/api";
+import { UploadZone } from "@/components/UploadZone";
 import { Document, DocumentMetadata } from "@/types/ingestion";
-import { UploadZone } from "./UploadZone";
-import {
-  Bot,
-  ShieldCheck,
-  UploadCloud,
-  FileText,
-  Send,
-  RefreshCw,
-  AlertTriangle,
-  Sparkles,
-  Zap,
-  CheckCircle2,
-  Cpu,
-} from "lucide-react";
 
 interface GroundedQAProps {
-  documents?: DocumentMetadata[];
-  selectedDocId?: string | null;
-  onSelectDocId?: (docId: string | null) => void;
-  onUploadSuccess?: (doc: Document) => void;
+  documents: DocumentMetadata[];
+  selectedDocId: string | null;
+  onSelectDocId: (documentId: string | null) => void;
+  onUploadSuccess: (document: Document) => void;
+  onContext: (query: string, evidence: CompactedEvidence[]) => void;
 }
 
-export function GroundedQA({
-  documents = [],
-  selectedDocId = null,
+export const GroundedQA: React.FC<GroundedQAProps> = ({
+  documents,
+  selectedDocId,
   onSelectDocId,
   onUploadSuccess,
-}: GroundedQAProps) {
+  onContext,
+}) => {
   const [query, setQuery] = useState("");
+  const [sessionId, setSessionId] = useState<string>();
+  const [naiveAnswer, setNaiveAnswer] = useState<NaiveGenerationResponse>();
+  const [groundedAnswer, setGroundedAnswer] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [currentStage, setCurrentStage] = useState<string | null>(null);
-  const [currentStageMessage, setCurrentStageMessage] = useState<string | null>(null);
-  const [activeProvider, setActiveProvider] = useState<string | null>(null);
-  const [streamedAnswer, setStreamedAnswer] = useState<string>("");
-  const [comparison, setComparison] = useState<ComparisonResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [showUploadZone, setShowUploadZone] = useState(false);
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [activeSessionId, setActiveSessionId] = useState<string | undefined>();
-  const [conversationTurns, setConversationTurns] = useState<EpisodicMemoryItem[]>([]);
-
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const selectedDoc = documents.find((d) => d.document_id === selectedDocId);
+  const [isUploaderOpen, setIsUploaderOpen] = useState(false);
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+  const controllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    let mounted = true;
-    fetchSessions().then(async (existing) => {
-      if (!mounted) return;
-      if (existing.length) {
-        setSessions(existing);
-        setActiveSessionId(existing.find((session) => session.is_active)?.session_id ?? existing[0].session_id);
-      } else {
-        const created = await createSession("New conversation");
-        if (mounted) {
-          setSessions([created]);
-          setActiveSessionId(created.session_id);
+    setIsUploaderOpen(documents.length === 0);
+  }, [documents.length]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const initializeSession = async () => {
+      try {
+        const sessions = await fetchSessions();
+        if (cancelled) return;
+        if (sessions.length > 0) {
+          setSessionId(sessions[0].session_id);
+          return;
+        }
+        const session = await createSession("Default conversation");
+        if (!cancelled) setSessionId(session.session_id);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Could not initialize a conversation.");
         }
       }
-    }).catch((err) => setError(err instanceof Error ? err.message : "Could not load conversations."));
-    return () => { mounted = false; };
+    };
+    void initializeSession();
+    return () => {
+      cancelled = true;
+      controllerRef.current?.abort();
+    };
   }, []);
 
-  useEffect(() => {
-    if (!activeSessionId) { setConversationTurns([]); return; }
-    let mounted = true;
-    fetchSessionDetails(activeSessionId).then((details) => {
-      if (mounted) setConversationTurns(details.turns);
-    }).catch(() => { if (mounted) setConversationTurns([]); });
-    return () => { mounted = false; };
-  }, [activeSessionId]);
-
-  const startNewConversation = async () => {
-    try {
-      const created = await createSession(`Conversation ${sessions.length + 1}`, selectedDocId ? [selectedDocId] : []);
-      setSessions((current) => [created, ...current]);
-      setActiveSessionId(created.session_id);
-      setComparison(null);
-      setQuery("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create a conversation.");
-    }
+  const handleDocumentIngested = (document: Document) => {
+    onUploadSuccess(document);
+    setIsUploaderOpen(false);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!query.trim() || isLoading) return;
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const question = query.trim();
+    if (!question || isLoading) return;
 
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
-
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
     setIsLoading(true);
     setIsStreaming(true);
-    setError(null);
-    setComparison(null);
-    setStreamedAnswer("");
-    setCurrentStage("starting");
-    setCurrentStageMessage("Initiating hybrid retrieval & fallback pipeline...");
-    setActiveProvider(null);
-
-    let accumulatedTokens = "";
-    let capturedSufficiency: SufficiencyAssessment | null = null;
-    let capturedGrounding: GroundingReport | null = null;
-    let capturedNaive: NaiveGenerationResponse | null = null;
-    let capturedProvider = "Auto-Fallback Cascade";
+    setError("");
+    setStatus("Preparing answers...");
+    setNaiveAnswer(undefined);
+    setGroundedAnswer("");
+    onContext(question, []);
 
     try {
       await streamQuestionComparison(
-        query.trim(),
-        activeSessionId,
-        selectedDocId || undefined,
+        question,
+        sessionId,
+        selectedDocId ?? undefined,
         {
-          onStage: (stage, message) => {
-            setCurrentStage(stage);
-            setCurrentStageMessage(message);
-          },
-          onProvider: (model, provider) => {
-            setActiveProvider(`${provider} (${model})`);
-            capturedProvider = `${provider} (${model})`;
-          },
-          onSufficiency: (sufficiency) => {
-            capturedSufficiency = sufficiency;
-          },
-          onAbstention: (abstention) => {
-            accumulatedTokens = abstention.answer;
-            setStreamedAnswer(abstention.answer);
-          },
-          onToken: (token) => {
-            accumulatedTokens += token;
-            setStreamedAnswer((prev) => prev + token);
-          },
-          onGrounding: (report) => {
-            capturedGrounding = report;
-          },
-          onNaive: (naive) => {
-            capturedNaive = naive;
-          },
-          onDone: (data) => {
-            const comp: ComparisonResponse = {
-              query: query.trim(),
-              naive: capturedNaive || {
-                query: query.trim(),
-                answer: "Naive baseline processing completed.",
-                has_citations: false,
-                citations: [],
-                faithfulness_score: 0.2,
-                hallucination_risk: "High (Unverified)",
-                latency_ms: data.latency_ms,
-                model_name: "Naive Baseline",
-              },
-              grounded: {
-                query: query.trim(),
-                answer: accumulatedTokens,
-                abstained: capturedSufficiency ? !capturedSufficiency.is_sufficient : false,
-                abstention_reason: capturedSufficiency?.reasoning || undefined,
-                sufficiency: capturedSufficiency || {
-                  is_sufficient: true,
-                  sufficiency_score: 1.0,
-                  threshold: 0.4,
-                  reasoning: "Sufficient evidence",
-                  matched_aspects: [],
-                  missing_aspects: [],
-                  topic: "Query context",
-                },
-                grounding_report: capturedGrounding || {
-                  faithfulness_score: 1.0,
-                  hallucination_detected: false,
-                  total_claims: 0,
-                  entailed_claims_count: 0,
-                  neutral_claims_count: 0,
-                  contradicted_claims_count: 0,
-                  claims: [],
-                  verified_citations: data.citations || [],
-                  unverified_citations: [],
-                },
-                citations: data.citations || [],
-                latency_ms: data.latency_ms,
-                model_name: data.model || capturedProvider,
-              },
-              metrics_comparison: data.metrics_comparison,
-            };
-            setComparison(comp);
-            setIsStreaming(false);
-          },
+          onStage: (_stage, message) => setStatus(message),
+          onNaive: setNaiveAnswer,
+          onContext: (evidence) => onContext(question, evidence),
+          onToken: (token) => setGroundedAnswer((current) => current + token),
+          onDone: () => setStatus(""),
         },
-        abortController.signal
+        controller.signal,
       );
-      if (activeSessionId) {
-        const details = await fetchSessionDetails(activeSessionId);
-        setConversationTurns(details.turns);
+    } catch (err) {
+      if (!controller.signal.aborted) {
+        setError(err instanceof Error ? err.message : "The comparison could not be completed.");
       }
-    } catch (err: unknown) {
-      if (!abortController.signal.aborted) {
-        setError(err instanceof Error ? err.message : "Failed to execute streaming comparison");
-      }
-      setIsStreaming(false);
     } finally {
-      setIsLoading(false);
+      if (controllerRef.current === controller) {
+        controllerRef.current = null;
+        setIsLoading(false);
+        setIsStreaming(false);
+        setStatus("");
+      }
     }
   };
 
-  const handleDocumentIngested = (doc: Document) => {
-    if (onUploadSuccess) onUploadSuccess(doc);
-    if (onSelectDocId) onSelectDocId(doc.id);
-    setShowUploadZone(false);
-  };
-
-  const grounded: GroundedAnswerResponse | undefined = comparison?.grounded;
-  const naive = comparison?.naive;
-
-  // Format citations cleanly in grounded answer text
-  const renderGroundedAnswer = (text: string) => {
-    const parts = text.split(/(\[Doc\s+[^\]]+\])/g);
-    return parts.map((part, i) => {
-      if (/^\[Doc\s+[^\]]+\]$/.test(part)) {
-        return (
-          <span
-            key={i}
-            className="inline-block bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded text-xs font-mono font-medium mx-1 shadow-sm"
-          >
-            {part}
-          </span>
-        );
-      }
-      return <span key={i}>{part}</span>;
-    });
-  };
-
   return (
-    <div className="space-y-6 max-w-6xl mx-auto">
-      {/* ==================================================================== */}
-      {/* 1. DOCUMENT & FALLBACK STATUS BAR (ORCHESTRATOR)                     */}
-      {/* ==================================================================== */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm">
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-400">
-            <FileText className="w-5 h-5" />
-          </div>
+    <section className="space-y-5">
+      <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-slate-200">Target Context:</span>
-              {documents.length > 0 ? (
-                <select
-                  value={selectedDocId || "all"}
-                  onChange={(e) =>
-                    onSelectDocId?.(e.target.value === "all" ? null : e.target.value)
-                  }
-                  className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-200 font-medium focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                >
-                  <option value="all">All Documents ({documents.length})</option>
-                  {documents.map((d) => (
-                    <option key={d.document_id} value={d.document_id}>
-                      {d.source_name}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <span className="text-xs text-amber-400 font-medium">
-                  No document uploaded yet
-                </span>
-              )}
-            </div>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {selectedDoc
-                ? `Active: ${selectedDoc.source_name} (${selectedDoc.chunk_count} chunks • 220 words + 30 overlap)`
-                : documents.length > 0
-                ? "Full corpus index (FAISS Dense + BM25 Sparse + RRF)"
-                : "Upload a document to run grounded anti-hallucination inference"}
+            <h2 className="text-sm font-semibold text-white">Documents</h2>
+            <p className="mt-1 text-xs text-slate-400">
+              Choose a document or ask across the full workspace.
             </p>
           </div>
-        </div>
-
-        <div className="flex items-center gap-3 flex-wrap">
-          {/* Dynamic Auto-Fallback Cascade Indicator */}
-          <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 px-3 py-1.5 rounded-lg">
-            <div className="flex items-center gap-1.5">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-              </span>
-              <span className="text-xs font-semibold text-slate-300 flex items-center gap-1">
-                <Zap className="w-3.5 h-3.5 text-amber-400" />
-                Fallback Cascade:
-              </span>
-            </div>
-            <div className="flex items-center gap-1 text-[11px] font-mono">
-              <span className="px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 font-medium">
-                Gemini
-              </span>
-              <span className="text-slate-600">&rarr;</span>
-              <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 font-medium">
-                Groq
-              </span>
-              <span className="text-slate-600">&rarr;</span>
-              <span className="px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-300 border border-violet-500/20 font-medium">
-                OpenRouter
-              </span>
-            </div>
-          </div>
-
           <button
-            onClick={() => setShowUploadZone(!showUploadZone)}
-            className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition shrink-0"
+            type="button"
+            onClick={() => setIsUploaderOpen((open) => !open)}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800"
           >
-            <UploadCloud className="w-4 h-4 text-indigo-400" />
-            {showUploadZone ? "Close Uploader" : "Upload Document"}
+            <UploadCloud className="h-4 w-4 text-indigo-400" />
+            {isUploaderOpen ? "Close upload" : "Upload document"}
           </button>
         </div>
-      </div>
 
-      {/* Upload Zone Modal / Drawer */}
-      {(showUploadZone || documents.length === 0) && (
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-300">
-              Upload Document (PDF, DOCX, TXT, MD)
-            </h3>
-            {documents.length > 0 && (
-              <button
-                onClick={() => setShowUploadZone(false)}
-                className="text-xs text-slate-400 hover:text-slate-200"
-              >
-                Close
-              </button>
-            )}
+        {isUploaderOpen && (
+          <div className="mt-4">
+            <UploadZone onIngestSuccess={handleDocumentIngested} />
           </div>
-          <UploadZone onIngestSuccess={handleDocumentIngested} />
-        </div>
-      )}
+        )}
 
-      {/* ==================================================================== */}
-      {/* 2. QUERY INPUT & REAL-TIME PROGRESS                                  */}
-      {/* ==================================================================== */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-sm space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-medium text-slate-400">Conversation</span>
-            <select value={activeSessionId || ""} onChange={(event) => setActiveSessionId(event.target.value || undefined)} className="max-w-64 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-200">
-              {sessions.map((session) => <option key={session.session_id} value={session.session_id}>{session.title} · {session.turn_count} turns</option>)}
-            </select>
-            <button type="button" onClick={startNewConversation} className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:bg-slate-800">New chat</button>
-          </div>
-          <span className="text-[11px] text-slate-500">Relevant past turns can be recalled as external memory.</span>
-        </div>
-        {conversationTurns.length > 0 && <details className="rounded-lg border border-slate-800 bg-slate-950/60">
-          <summary className="cursor-pointer px-3 py-2 text-xs text-slate-300">Conversation history ({conversationTurns.length})</summary>
-          <div className="max-h-72 space-y-3 overflow-y-auto border-t border-slate-800 p-3">{[...conversationTurns].reverse().map((turn) => <article key={turn.memory_id} className="rounded-lg bg-slate-900 p-3"><p className="text-xs font-semibold text-cyan-300">You</p><p className="mt-1 text-sm text-slate-200">{turn.query}</p><p className="mt-3 text-xs font-semibold text-indigo-300">Assistant</p><p className="mt-1 whitespace-pre-wrap text-sm text-slate-300">{turn.answer}</p>{turn.citations.length > 0 && <p className="mt-2 text-[11px] text-slate-500">Citations: {turn.citations.join(", ")}</p>}</article>)}</div>
-        </details>}
-        <form onSubmit={handleSubmit} className="flex gap-2">
+        <label className="mt-4 block text-xs font-medium text-slate-300" htmlFor="qa-document">
+          Search scope
+        </label>
+        <select
+          id="qa-document"
+          value={selectedDocId ?? ""}
+          onChange={(event) => onSelectDocId(event.target.value || null)}
+          className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-slate-100"
+        >
+          <option value="">All documents</option>
+          {documents.map((document) => (
+            <option key={document.document_id} value={document.document_id}>
+              {document.source_name}
+            </option>
+          ))}
+        </select>
+
+        <form onSubmit={handleSubmit} className="mt-4 flex gap-2">
           <input
-            type="text"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={
-              selectedDoc
-                ? `Ask anything about "${selectedDoc.source_name}" (Streamed via Gemini / Groq / OpenRouter)...`
-                : "Ask a question to stream comparison: Naive Baseline vs. Grounded Pipeline..."
-            }
-            className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Ask a question about your documents"
+            aria-label="Question"
+            className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
           />
           <button
             type="submit"
             disabled={isLoading || !query.trim()}
-            className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-medium px-5 py-3 rounded-lg flex items-center gap-2 text-sm transition shrink-0 shadow-md shadow-indigo-600/20"
+            className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-indigo-600 px-4 py-3 text-sm font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {isLoading ? (
-              <>
-                <RefreshCw className="w-4 h-4 animate-spin" />
-                Streaming...
-              </>
-            ) : (
-              <>
-                <Send className="w-4 h-4" />
-                Compare &amp; Stream
-              </>
-            )}
+            {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            Ask
           </button>
         </form>
 
-        {/* Live Stepper Status Pill */}
-        {isLoading && currentStageMessage && (
-          <div className="flex items-center justify-between bg-slate-950/80 border border-indigo-900/40 rounded-lg px-3.5 py-2 text-xs text-slate-300">
-            <div className="flex items-center gap-2.5">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
-              </span>
-              <span className="font-mono text-indigo-300 uppercase text-[10px] tracking-wider px-1.5 py-0.5 rounded bg-indigo-950/60 border border-indigo-800/40">
-                {currentStage}
-              </span>
-              <span className="text-slate-300">{currentStageMessage}</span>
-            </div>
-            {activeProvider && (
-              <span className="text-[11px] font-mono text-emerald-400 font-medium">
-                Active: {activeProvider}
-              </span>
-            )}
-          </div>
-        )}
-
+        {status && <p className="mt-3 text-xs text-slate-400">{status}</p>}
         {error && (
-          <div className="p-3 bg-red-950/40 border border-red-800/80 rounded-lg text-red-200 text-xs flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
-            <span className="flex-1">{error}</span>
-          </div>
+          <p role="alert" className="mt-3 rounded-lg border border-rose-900 bg-rose-950/40 p-3 text-sm text-rose-300">
+            {error}
+          </p>
         )}
       </div>
 
-      {/* ==================================================================== */}
-      {/* 3. SIDE-BY-SIDE STREAMING COMPARISON VIEW                            */}
-      {/* ==================================================================== */}
-      {(isStreaming || comparison || streamedAnswer) && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between px-1">
-            <h3 className="text-sm font-semibold text-slate-300 flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-indigo-400" />
-              Comparison for: &ldquo;{query || comparison?.query}&rdquo;
-            </h3>
-            {(activeProvider || comparison?.grounded?.model_name) && (
-              <span className="text-xs font-mono text-emerald-400 bg-emerald-950/40 border border-emerald-800/40 px-2.5 py-1 rounded-md flex items-center gap-1.5">
-                <Cpu className="w-3.5 h-3.5" />
-                {activeProvider || comparison?.grounded?.model_name}
-              </span>
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* ---------------------------------------------------------------- */}
-            {/* LEFT: NAIVE LLM (ENTIRE RAW DOCUMENT PROMPT)                     */}
-            {/* ---------------------------------------------------------------- */}
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between space-y-4">
-              <div className="space-y-3">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                  <div className="flex items-center gap-2">
-                    <Bot className="w-4 h-4 text-slate-400" />
-                    <span className="font-semibold text-sm text-slate-200">
-                      Naive LLM (Monolithic Baseline)
-                    </span>
-                  </div>
-                  <span className="text-[11px] font-medium px-2 py-0.5 rounded bg-red-500/10 text-red-400 border border-red-500/20">
-                    No Retrieval / Blind
-                  </span>
-                </div>
-
-                <div className="text-sm leading-relaxed text-slate-300 min-h-[120px]">
-                  {naive ? (
-                    naive.answer
-                  ) : isLoading ? (
-                    <div className="flex items-center gap-2 text-xs text-slate-500 pt-6">
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      <span>Computing ungrounded monolithic prompt baseline...</span>
-                    </div>
-                  ) : (
-                    "No naive baseline response available."
-                  )}
-                </div>
-              </div>
-
-              <div className="pt-3 border-t border-slate-800/60 text-xs text-slate-500 flex items-center justify-between">
-                <span>⚠️ Directly prompted with entire raw document text without chunking.</span>
-                {naive && (
-                  <span className="text-red-400 font-mono text-[11px]">
-                    0 citations • Unverified
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {/* ---------------------------------------------------------------- */}
-            {/* RIGHT: OUR APPLICATION (FALLBACK LLM + VERIFICATION)              */}
-            {/* ---------------------------------------------------------------- */}
-            <div className="bg-slate-900 border border-indigo-900/50 rounded-xl p-5 flex flex-col justify-between space-y-4 shadow-sm ring-1 ring-indigo-500/10">
-              <div className="space-y-3">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                    <span className="font-semibold text-sm text-white">
-                      Our Application (Grounded Mitigation)
-                    </span>
-                  </div>
-                  <span className="text-[11px] font-medium px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
-                    <CheckCircle2 className="w-3 h-3" />
-                    Grounded &amp; NLI Verified
-                  </span>
-                </div>
-
-                <div className="text-sm leading-relaxed text-slate-100 min-h-[120px]">
-                  {isStreaming ? (
-                    <div>
-                      {renderGroundedAnswer(streamedAnswer)}
-                      <span className="inline-block w-2 h-4 ml-1 bg-indigo-400 animate-pulse align-middle" />
-                    </div>
-                  ) : grounded ? (
-                    renderGroundedAnswer(grounded.answer)
-                  ) : streamedAnswer ? (
-                    renderGroundedAnswer(streamedAnswer)
-                  ) : (
-                    <div className="flex items-center gap-2 text-xs text-indigo-300/80 pt-6">
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      <span>Streaming response via fallback cascade...</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="pt-3 border-t border-slate-800/60 text-xs text-emerald-400/90 flex items-center justify-between">
-                <span>✓ Hybrid Retrieval • Compaction • Truthful Abstention • Claim NLI</span>
-                {(grounded?.citations?.length ?? 0) > 0 && (
-                  <span className="text-indigo-300 font-mono text-[11px] font-semibold">
-                    {grounded?.citations.length} verified citations
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Comparison Metrics Telemetry Cards */}
-          {comparison?.metrics_comparison && (
-            <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4 space-y-3">
-              <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                Guardrail Verification Metrics
-              </h4>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
-                <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
-                  <div className="text-slate-500 text-[10px] uppercase">Faithfulness</div>
-                  <div className="text-emerald-400 font-bold mt-0.5">
-                    {comparison.metrics_comparison.grounded_faithfulness}
-                  </div>
-                </div>
-                <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
-                  <div className="text-slate-500 text-[10px] uppercase">Sufficiency Gate</div>
-                  <div className="text-indigo-300 font-bold mt-0.5">
-                    {comparison.metrics_comparison.grounded_sufficiency_gate}
-                  </div>
-                </div>
-                <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
-                  <div className="text-slate-500 text-[10px] uppercase">NLI Claims</div>
-                  <div className="text-slate-200 font-bold mt-0.5">
-                    {comparison.metrics_comparison.grounded_nli_claims}
-                  </div>
-                </div>
-                <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
-                  <div className="text-slate-500 text-[10px] uppercase">Latency</div>
-                  <div className="text-amber-400 font-bold mt-0.5">
-                    {comparison.grounded?.latency_ms} ms
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
+      {(naiveAnswer || groundedAnswer || isLoading) && (
+        <div className="grid gap-4 md:grid-cols-2">
+          <AnswerCard
+            title="Direct LLM response"
+            text={naiveAnswer?.answer ?? ""}
+            loading={isLoading && !naiveAnswer}
+          />
+          <AnswerCard
+            title="Hybrid retrieval response"
+            text={groundedAnswer}
+            loading={isLoading && !groundedAnswer}
+            streaming={isStreaming && Boolean(groundedAnswer)}
+          />
         </div>
       )}
-    </div>
+    </section>
+  );
+};
+
+function AnswerCard({
+  title,
+  text,
+  loading,
+  streaming = false,
+}: {
+  title: string;
+  text: string;
+  loading: boolean;
+  streaming?: boolean;
+}) {
+  return (
+    <article className="min-h-48 rounded-xl border border-slate-800 bg-slate-900 p-5">
+      <h3 className="border-b border-slate-800 pb-3 text-sm font-semibold text-slate-100">
+        {title}
+      </h3>
+      <div className="whitespace-pre-wrap pt-4 text-sm leading-6 text-slate-300">
+        {text || (loading ? <span className="text-slate-500">Generating response…</span> : null)}
+        {streaming && <span className="ml-1 inline-block h-4 w-1 animate-pulse bg-indigo-400 align-middle" />}
+      </div>
+    </article>
   );
 }
