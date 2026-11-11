@@ -46,25 +46,59 @@ class HybridRetriever:
         self.index_manager = index_manager or default_index_manager
         self.query_processor = query_processor or default_query_processor
 
-        self.dense_retriever = dense_retriever or DenseRetriever(
-            vector_index=self.index_manager.vector_index,
-            metadata_store=self.index_manager.metadata_store,
-            embedding_engine=self.index_manager.embedding_engine,
-        )
+        self._custom_dense_retriever = dense_retriever
+        self._custom_sparse_retriever = sparse_retriever
+        self._custom_rrf_engine = rrf_engine
 
-        self.sparse_retriever = sparse_retriever or SparseRetriever(
-            bm25_index=self.index_manager.bm25_index,
-            metadata_store=self.index_manager.metadata_store,
-        )
-
-        self.rrf_engine = rrf_engine or RRFEngine(
-            metadata_store=self.index_manager.metadata_store
-        )
         self.result_cache: LruTtlCache[str, RetrievalResponse] = LruTtlCache(
             max_size=2048, ttl_seconds=90
         )
         # Bounded semantic query cache for near-instant paraphrased query hits (cos sim >= 0.96)
         self._semantic_cache: list[dict[str, Any]] = []
+        # Reusable thread pool for parallel dense and sparse retrieval
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+
+    @property
+    def dense_retriever(self) -> DenseRetriever:
+        """Dynamically resolved DenseRetriever bound to current index_manager."""
+        if self._custom_dense_retriever is not None:
+            return self._custom_dense_retriever
+        return DenseRetriever(
+            vector_index=self.index_manager.vector_index,
+            metadata_store=self.index_manager.metadata_store,
+            embedding_engine=self.index_manager.embedding_engine,
+        )
+
+    @dense_retriever.setter
+    def dense_retriever(self, val: DenseRetriever | None) -> None:
+        self._custom_dense_retriever = val
+
+    @property
+    def sparse_retriever(self) -> SparseRetriever:
+        """Dynamically resolved SparseRetriever bound to current index_manager."""
+        if self._custom_sparse_retriever is not None:
+            return self._custom_sparse_retriever
+        return SparseRetriever(
+            bm25_index=self.index_manager.bm25_index,
+            metadata_store=self.index_manager.metadata_store,
+        )
+
+    @sparse_retriever.setter
+    def sparse_retriever(self, val: SparseRetriever | None) -> None:
+        self._custom_sparse_retriever = val
+
+    @property
+    def rrf_engine(self) -> RRFEngine:
+        """Dynamically resolved RRFEngine bound to current index_manager."""
+        if self._custom_rrf_engine is not None:
+            return self._custom_rrf_engine
+        return RRFEngine(
+            metadata_store=self.index_manager.metadata_store,
+        )
+
+    @rrf_engine.setter
+    def rrf_engine(self, val: RRFEngine | None) -> None:
+        self._custom_rrf_engine = val
 
     def retrieve(
         self,
@@ -75,6 +109,8 @@ class HybridRetriever:
         top_k_sparse: int = 50,
         top_k_fused: int = 50,
         rrf_k: int = 60,
+        dense_weight: float | None = None,
+        sparse_weight: float | None = None,
     ) -> RetrievalResponse:
         """Execute complete hybrid retrieval with pre-flight query processing and RRF fusion.
 
@@ -86,6 +122,8 @@ class HybridRetriever:
             top_k_sparse: Candidate count from sparse BM25 search.
             top_k_fused: Top candidate count to return after fusion.
             rrf_k: Smoothing constant k for RRF (default 60).
+            dense_weight: Optional explicit multiplier weight for dense FAISS rankings.
+            sparse_weight: Optional explicit multiplier weight for sparse BM25 rankings.
 
         Returns:
             RetrievalResponse with fused candidates and execution telemetry.
@@ -116,6 +154,8 @@ class HybridRetriever:
             "top_k_sparse": top_k_sparse,
             "top_k_fused": top_k_fused,
             "rrf_k": rrf_k,
+            "dense_weight": dense_weight,
+            "sparse_weight": sparse_weight,
             "index_revision": self.index_manager.revision,
         }
         cache_key = json.dumps(cache_payload, sort_keys=True, default=str)
@@ -139,10 +179,15 @@ class HybridRetriever:
                             entry["revision"] == self.index_manager.revision
                             and entry["filters"] == (filters or {})
                             and entry["top_k_fused"] >= top_k_fused
+                            and entry.get("dense_weight") == dense_weight
+                            and entry.get("sparse_weight") == sparse_weight
                         ):
                             sim = float(np.dot(query_vec, entry["vec"]))
                             if sim >= 0.96:
                                 hit = entry["response"].model_copy(deep=True)
+                                if len(hit.candidates) > top_k_fused:
+                                    hit.candidates = hit.candidates[:top_k_fused]
+                                    hit.total_candidates = len(hit.candidates)
                                 hit.execution_time_ms = round(
                                     (time.perf_counter() - start_time) * 1000, 2
                                 )
@@ -163,64 +208,111 @@ class HybridRetriever:
         if filters:
             combined_filters.update(filters)
 
-        search_query = processed_query.query or query
+        dense_query = processed_query.rewritten_query or query
+        sparse_query = processed_query.query or query
+
+        # Helper runners with robust exception suppression for single-retriever failure isolation
+        def _exec_dense(
+            q: str,
+            k: int,
+            f: dict[str, Any] | None,
+            vec: np.ndarray | None = None,
+        ) -> list[tuple[str, float]]:
+            try:
+                return self.dense_retriever.retrieve(
+                    query=q, top_k=k, filters=f, query_vector=vec
+                )
+            except Exception:
+                return []
+
+        def _exec_sparse(
+            q: str,
+            k: int,
+            f: dict[str, Any] | None,
+        ) -> list[tuple[str, float]]:
+            try:
+                return self.sparse_retriever.retrieve(query=q, top_k=k, filters=f)
+            except Exception:
+                return []
 
         # Stage 2 & 3: Parallel Execution of Dense (Semantic) and Sparse (BM25) Retrieval
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-            future_dense = executor.submit(
-                self.dense_retriever.retrieve,
-                query=search_query,
-                top_k=top_k_dense,
-                filters=combined_filters or None,
-            )
-            future_sparse = executor.submit(
-                self.sparse_retriever.retrieve,
-                query=search_query,
-                top_k=top_k_sparse,
-                filters=combined_filters or None,
-            )
-            dense_results = future_dense.result()
-            sparse_results = future_sparse.result()
+        q_vec_for_dense = (
+            query_vec
+            if (query_vec is not None and dense_query.strip().lower() == query.strip().lower())
+            else None
+        )
+        future_dense = self._executor.submit(
+            _exec_dense,
+            dense_query,
+            top_k_dense,
+            combined_filters or None,
+            q_vec_for_dense,
+        )
+        future_sparse = self._executor.submit(
+            _exec_sparse,
+            sparse_query,
+            top_k_sparse,
+            combined_filters or None,
+        )
+        dense_results = future_dense.result()
+        sparse_results = future_sparse.result()
 
-        # Adaptive filter relaxation: If auto-extracted filters produced 0 candidates,
-        # fallback to explicit user filters (or None) and search concurrently with rewritten query
+        # Adaptive filter relaxation:
+        # If auto-extracted heuristic filters caused sparse or dense search to return 0 or
+        # severely depleted candidates, fall back to the user's explicit filters
         if (
-            not dense_results
-            and not sparse_results
+            (
+                not dense_results
+                or not sparse_results
+                or (len(dense_results) + len(sparse_results) < 2)
+            )
             and processed_query.filters
             and combined_filters != (filters or {})
         ):
-            fallback_query = processed_query.rewritten_query or query
-            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                f_dense = executor.submit(
-                    self.dense_retriever.retrieve,
-                    query=fallback_query,
-                    top_k=top_k_dense,
-                    filters=filters,
-                )
-                f_sparse = executor.submit(
-                    self.sparse_retriever.retrieve,
-                    query=fallback_query,
-                    top_k=top_k_sparse,
-                    filters=filters,
-                )
-                dense_results = f_dense.result()
-                sparse_results = f_sparse.result()
+            fallback_dense_query = processed_query.rewritten_query or query
+            fallback_sparse_query = processed_query.query or query
+            f_dense = self._executor.submit(
+                _exec_dense,
+                fallback_dense_query,
+                top_k_dense,
+                filters,
+                None,
+            )
+            f_sparse = self._executor.submit(
+                _exec_sparse,
+                fallback_sparse_query,
+                top_k_sparse,
+                filters,
+            )
+            rel_dense = f_dense.result()
+            rel_sparse = f_sparse.result()
 
-        # Dynamic intent-aware RRF weights
-        dense_weight = 1.0
-        sparse_weight = 1.0
-        if (
-            processed_query.intent in (QueryIntent.FACTUAL, QueryIntent.KEYWORD_LOOKUP)
-            or re.search(r"\b\d{4}\b|[A-Z0-9_-]{4,}", search_query)
-        ):
-            # Keyword / code / date factoids benefit from BM25 lexical precision
-            sparse_weight = 1.2
-            dense_weight = 0.8
-        elif processed_query.intent == QueryIntent.SUMMARY:
-            # Broad thematic questions benefit from dense semantic vector matching
-            dense_weight = 1.2
-            sparse_weight = 0.8
+            if not dense_results or len(rel_dense) > len(dense_results):
+                dense_results = rel_dense
+            if not sparse_results or len(rel_sparse) > len(sparse_results):
+                sparse_results = rel_sparse
+
+        # Dynamic intent-aware RRF weights if not explicitly overridden
+        if dense_weight is None or sparse_weight is None:
+            eff_dense_weight = 1.0
+            eff_sparse_weight = 1.0
+            if (
+                processed_query.intent in (QueryIntent.FACTUAL, QueryIntent.KEYWORD_LOOKUP)
+                or re.search(r"\b\d{4}\b|[A-Z0-9_-]{4,}", sparse_query)
+            ):
+                # Keyword / code / date factoids benefit from BM25 lexical precision
+                eff_sparse_weight = 1.2
+                eff_dense_weight = 0.8
+            elif processed_query.intent in (QueryIntent.SUMMARY, QueryIntent.EXPLORATORY):
+                # Broad thematic questions benefit from dense semantic vector matching
+                eff_dense_weight = 1.2
+                eff_sparse_weight = 0.8
+            elif processed_query.intent == QueryIntent.COMPARISON:
+                eff_dense_weight = 1.05
+                eff_sparse_weight = 1.05
+
+            dense_weight = dense_weight if dense_weight is not None else eff_dense_weight
+            sparse_weight = sparse_weight if sparse_weight is not None else eff_sparse_weight
 
         # Stage 4: Reciprocal Rank Fusion (RRF) with Intent Weighting
         candidates: list[RetrievedCandidate] = self.rrf_engine.fuse(
@@ -261,6 +353,8 @@ class HybridRetriever:
                         "revision": self.index_manager.revision,
                         "filters": filters or {},
                         "top_k_fused": top_k_fused,
+                        "dense_weight": dense_weight,
+                        "sparse_weight": sparse_weight,
                     }
                 )
             except Exception:
@@ -278,6 +372,8 @@ class HybridRetriever:
             top_k_sparse=request.top_k_sparse,
             top_k_fused=request.top_k_fused,
             rrf_k=request.rrf_k,
+            dense_weight=request.dense_weight,
+            sparse_weight=request.sparse_weight,
         )
 
 

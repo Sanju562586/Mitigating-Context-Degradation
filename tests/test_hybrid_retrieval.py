@@ -372,3 +372,149 @@ class TestHybridRetrievalAPI:
         assert data["status"] == "ready"
         assert data["module"] == "Hybrid Retrieval & RRF"
         assert "indexes" in data
+
+    def test_api_hybrid_retrieval_with_custom_weights(
+        self, test_manager: IndexManager, monkeypatch
+    ):
+        from src.api.retrieval_routes import default_hybrid_retriever
+
+        monkeypatch.setattr(default_hybrid_retriever, "index_manager", test_manager)
+
+        payload = {
+            "query": "What are the rules for sick leave?",
+            "top_k_dense": 10,
+            "top_k_sparse": 10,
+            "top_k_fused": 3,
+            "dense_weight": 1.5,
+            "sparse_weight": 0.5,
+        }
+
+        resp = client.post("/api/retrieval/hybrid", json=payload)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["candidates"]) <= 3
+
+
+class TestHybridRetrieverRobustnessAndFixes:
+    """Verify bugfixes: semantic cache truncation, dynamic index updates, ghost chunk filtering, fault resilience."""
+
+    def test_semantic_cache_truncation_to_requested_top_k(
+        self, test_manager: IndexManager
+    ):
+        retriever = HybridRetriever(index_manager=test_manager)
+        query = "Explain the rules for taking paid sick leave"
+
+        # Prime the semantic cache with top_k_fused=50
+        resp1 = retriever.retrieve(query=query, top_k_fused=50)
+        assert resp1.total_candidates > 0
+
+        # Follow-up query asking for only 1 candidate must NOT return 50 candidates
+        resp2 = retriever.retrieve(query=query, top_k_fused=1)
+        assert len(resp2.candidates) == 1
+        assert resp2.total_candidates == 1
+
+    def test_dynamic_index_manager_property_updates(self, tmp_path: Path):
+        retriever = HybridRetriever()
+
+        # Create a new isolated manager with 1 document
+        new_manager = IndexManager(storage_dir=tmp_path / "new_idx")
+        doc = Document.create(
+            source_name="custom_policy.txt",
+            file_type=DocumentType.TXT,
+            elements=[
+                DocumentElement(
+                    id="el1",
+                    element_type="paragraph",
+                    content="Remote work allowance is 500 dollars annually.",
+                )
+            ],
+            extra_metadata={"department": "HR"},
+        )
+        new_manager.index_document(doc)
+
+        # Assign new manager: property should immediately reflect new indexes
+        retriever.index_manager = new_manager
+        assert retriever.dense_retriever.vector_index == new_manager.vector_index
+        assert retriever.sparse_retriever.bm25_index == new_manager.bm25_index
+        assert retriever.rrf_engine.metadata_store == new_manager.metadata_store
+
+        resp = retriever.retrieve("remote work allowance")
+        assert resp.total_candidates > 0
+        assert "500 dollars" in resp.candidates[0].content
+
+    def test_single_retriever_failure_resilience(self, test_manager: IndexManager):
+        retriever = HybridRetriever(index_manager=test_manager)
+
+        # Mock dense retriever raising an error (e.g. CUDA OOM or Faiss error)
+        class FaultyDenseRetriever:
+            def retrieve(self, *args, **kwargs):
+                raise RuntimeError("Simulated dense FAISS accelerator failure")
+
+        retriever.dense_retriever = FaultyDenseRetriever()
+
+        # Hybrid retrieval should NOT crash; sparse retrieval should fulfill the request
+        resp = retriever.retrieve("FAISS IndexFlatIP throughput")
+        assert resp.total_candidates > 0
+        assert resp.dense_count == 0
+        assert resp.sparse_count > 0
+        assert "throughput" in resp.candidates[0].content
+
+    def test_ghost_chunk_skipping_in_rrf(self):
+        engine = RRFEngine()
+
+        class MockStore:
+            total_chunks = 1
+
+            def get(self, chunk_id: str):
+                if chunk_id == "valid_chunk":
+                    return {
+                        "chunk_id": "valid_chunk",
+                        "content": "Valid chunk content.",
+                        "document_id": "doc_1",
+                        "chunk_index": 0,
+                        "metadata": {},
+                    }
+                return None
+
+        # doc_ghost is at dense rank 1, but missing from metadata_store
+        dense = [("doc_ghost", 0.99), ("valid_chunk", 0.85)]
+        sparse = [("valid_chunk", 10.0)]
+
+        candidates = engine.fuse(
+            dense_results=dense,
+            sparse_results=sparse,
+            top_k=1,
+            metadata_store=MockStore(),
+        )
+
+        assert len(candidates) == 1
+        assert candidates[0].chunk_id == "valid_chunk"
+        assert candidates[0].content == "Valid chunk content."
+
+    def test_robust_metadata_filters_aliases_and_collections(self):
+        from src.retrieval.filters import matches_metadata_filters
+
+        record = {
+            "chunk_id": "c1",
+            "document_id": "doc_hr_1",
+            "content": "Employees get 20 days off in 2024.",
+            "metadata": {
+                "source_name": "handbook_2024.pdf",
+                "document_type": "HR_POLICY",
+                "department": "HR",
+                "page_numbers": [1, 2],
+                "section_titles": ["Vacation", "Leave"],
+            },
+        }
+
+        # Match alias doc_id
+        assert matches_metadata_filters(record, {"doc_id": "doc_hr_1"}) is True
+        # Match collection target_val
+        assert matches_metadata_filters(record, {"doc_id": ["doc_hr_1", "doc_other"]}) is True
+        # Match page number in collection val
+        assert matches_metadata_filters(record, {"page": 2}) is True
+        # Match section in collection val
+        assert matches_metadata_filters(record, {"section": "Leave"}) is True
+        # Discard mismatch
+        assert matches_metadata_filters(record, {"doc_id": "doc_wrong"}) is False
+
