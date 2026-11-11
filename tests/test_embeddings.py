@@ -9,7 +9,8 @@ from src.ingestion.models import DocumentChunk
 
 class TestEmbeddingEngine:
     @pytest.fixture(scope="module")
-    def engine(self):
+    @classmethod
+    def engine(cls):
         return EmbeddingEngine()
 
     def test_dimension_is_384(self, engine):

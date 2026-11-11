@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
+import re
 import time
 from typing import Any
 
+import numpy as np
+
 from src.cache import LruTtlCache
 from src.indexing.manager import IndexManager, default_index_manager
-from src.query_processing.models import ConversationTurn
+from src.query_processing.models import ConversationTurn, QueryIntent
 from src.query_processing.pipeline import QueryProcessor, default_query_processor
 from src.retrieval.dense import DenseRetriever
 from src.retrieval.models import (
@@ -59,6 +63,8 @@ class HybridRetriever:
         self.result_cache: LruTtlCache[str, RetrievalResponse] = LruTtlCache(
             max_size=2048, ttl_seconds=90
         )
+        # Bounded semantic query cache for near-instant paraphrased query hits (cos sim >= 0.96)
+        self._semantic_cache: list[dict[str, Any]] = []
 
     def retrieve(
         self,
@@ -121,6 +127,29 @@ class HybridRetriever:
             )
             return cached_response
 
+        # Fast Semantic Query Cache Check for single-turn standalone queries (similarity >= 0.96)
+        query_vec: np.ndarray | None = None
+        if not conversation_history and self._semantic_cache:
+            try:
+                query_vec = self.dense_retriever.embedding_engine.embed_query(query)
+                norm_q = np.linalg.norm(query_vec)
+                if norm_q > 0:
+                    for entry in reversed(self._semantic_cache):
+                        if (
+                            entry["revision"] == self.index_manager.revision
+                            and entry["filters"] == (filters or {})
+                            and entry["top_k_fused"] >= top_k_fused
+                        ):
+                            sim = float(np.dot(query_vec, entry["vec"]))
+                            if sim >= 0.96:
+                                hit = entry["response"].model_copy(deep=True)
+                                hit.execution_time_ms = round(
+                                    (time.perf_counter() - start_time) * 1000, 2
+                                )
+                                return hit
+            except Exception:
+                pass
+
         # Stage 1: Query Processing Pre-Flight
         processed_query = self.query_processor.process(
             query=query,
@@ -136,22 +165,25 @@ class HybridRetriever:
 
         search_query = processed_query.query or query
 
-        # Stage 2: Dense Retrieval (Semantic)
-        dense_results = self.dense_retriever.retrieve(
-            query=search_query,
-            top_k=top_k_dense,
-            filters=combined_filters or None,
-        )
-
-        # Stage 3: Sparse Retrieval (Lexical BM25)
-        sparse_results = self.sparse_retriever.retrieve(
-            query=search_query,
-            top_k=top_k_sparse,
-            filters=combined_filters or None,
-        )
+        # Stage 2 & 3: Parallel Execution of Dense (Semantic) and Sparse (BM25) Retrieval
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            future_dense = executor.submit(
+                self.dense_retriever.retrieve,
+                query=search_query,
+                top_k=top_k_dense,
+                filters=combined_filters or None,
+            )
+            future_sparse = executor.submit(
+                self.sparse_retriever.retrieve,
+                query=search_query,
+                top_k=top_k_sparse,
+                filters=combined_filters or None,
+            )
+            dense_results = future_dense.result()
+            sparse_results = future_sparse.result()
 
         # Adaptive filter relaxation: If auto-extracted filters produced 0 candidates,
-        # fallback to explicit user filters (or None) and search with rewritten query to guarantee high recall
+        # fallback to explicit user filters (or None) and search concurrently with rewritten query
         if (
             not dense_results
             and not sparse_results
@@ -159,23 +191,45 @@ class HybridRetriever:
             and combined_filters != (filters or {})
         ):
             fallback_query = processed_query.rewritten_query or query
-            dense_results = self.dense_retriever.retrieve(
-                query=fallback_query,
-                top_k=top_k_dense,
-                filters=filters,
-            )
-            sparse_results = self.sparse_retriever.retrieve(
-                query=fallback_query,
-                top_k=top_k_sparse,
-                filters=filters,
-            )
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                f_dense = executor.submit(
+                    self.dense_retriever.retrieve,
+                    query=fallback_query,
+                    top_k=top_k_dense,
+                    filters=filters,
+                )
+                f_sparse = executor.submit(
+                    self.sparse_retriever.retrieve,
+                    query=fallback_query,
+                    top_k=top_k_sparse,
+                    filters=filters,
+                )
+                dense_results = f_dense.result()
+                sparse_results = f_sparse.result()
 
-        # Stage 4: Reciprocal Rank Fusion (RRF)
+        # Dynamic intent-aware RRF weights
+        dense_weight = 1.0
+        sparse_weight = 1.0
+        if (
+            processed_query.intent in (QueryIntent.FACTUAL, QueryIntent.KEYWORD_LOOKUP)
+            or re.search(r"\b\d{4}\b|[A-Z0-9_-]{4,}", search_query)
+        ):
+            # Keyword / code / date factoids benefit from BM25 lexical precision
+            sparse_weight = 1.2
+            dense_weight = 0.8
+        elif processed_query.intent == QueryIntent.SUMMARY:
+            # Broad thematic questions benefit from dense semantic vector matching
+            dense_weight = 1.2
+            sparse_weight = 0.8
+
+        # Stage 4: Reciprocal Rank Fusion (RRF) with Intent Weighting
         candidates: list[RetrievedCandidate] = self.rrf_engine.fuse(
             dense_results=dense_results,
             sparse_results=sparse_results,
             top_k=top_k_fused,
             rrf_k=rrf_k,
+            dense_weight=dense_weight,
+            sparse_weight=sparse_weight,
             metadata_store=self.index_manager.metadata_store,
         )
 
@@ -191,6 +245,27 @@ class HybridRetriever:
             execution_time_ms=round(elapsed_ms, 2),
         )
         self.result_cache.set(cache_key, response.model_copy(deep=True))
+
+        # Store in Semantic Query Cache (max 256 entries)
+        if not conversation_history:
+            try:
+                if query_vec is None:
+                    query_vec = self.dense_retriever.embedding_engine.embed_query(query)
+                if len(self._semantic_cache) >= 256:
+                    self._semantic_cache.pop(0)
+                self._semantic_cache.append(
+                    {
+                        "vec": query_vec,
+                        "query": query,
+                        "response": response.model_copy(deep=True),
+                        "revision": self.index_manager.revision,
+                        "filters": filters or {},
+                        "top_k_fused": top_k_fused,
+                    }
+                )
+            except Exception:
+                pass
+
         return response
 
     def retrieve_request(self, request: RetrievalRequest) -> RetrievalResponse:

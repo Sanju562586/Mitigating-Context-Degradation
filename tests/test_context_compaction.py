@@ -93,6 +93,14 @@ class TestContextDeduplicator:
         set_c = {"completely", "different", "words"}
         assert ContextDeduplicator.jaccard_similarity(set_a, set_c) == 0.0
 
+    def test_strip_seam_overlap_helper(self):
+        dedup = ContextDeduplicator()
+        prev_chunk = "Employees receive 20 days vacation. Requests must be submitted two weeks in advance."
+        curr_chunk = "Requests must be submitted two weeks in advance. Unused days roll over into next year."
+        stripped = dedup.strip_seam_overlap(prev_chunk, curr_chunk)
+        assert "Unused days roll over" in stripped
+        assert "two weeks in advance" not in stripped
+
 
 class TestLostInTheMiddleReorderer:
     """Tests U-shaped attention distribution positioning."""
@@ -171,6 +179,13 @@ class TestTokenBudgetManager:
         assert total_tokens <= 60
         assert len(accepted) < len(candidates)
         assert "[Doc 1, Chunk 1]" in context
+
+    def test_adaptive_budget_by_intent(self):
+        mgr = TokenBudgetManager()
+        assert mgr.get_adaptive_budget("FACTUAL", max_budget=4000) == 700
+        assert mgr.get_adaptive_budget("COMPARISON", max_budget=4000) == 2000
+        assert mgr.get_adaptive_budget("SUMMARY", max_budget=4000) == 3500
+        assert mgr.get_adaptive_budget(None, max_budget=4000) == 4000
 
 
 class TestContextCompactorIntegration:

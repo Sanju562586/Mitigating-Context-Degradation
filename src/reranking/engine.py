@@ -30,7 +30,10 @@ class CrossEncoderEngine:
         if self._model is None:
             from sentence_transformers import CrossEncoder
 
-            self._model = CrossEncoder(self._model_name)
+            try:
+                self._model = CrossEncoder(self._model_name, local_files_only=True)
+            except Exception:
+                self._model = CrossEncoder(self._model_name)
         return self._model
 
     def predict(self, pairs: list[tuple[str, str]]) -> np.ndarray:

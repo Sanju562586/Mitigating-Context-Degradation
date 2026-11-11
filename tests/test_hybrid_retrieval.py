@@ -292,6 +292,29 @@ class TestHybridRetrieverIntegration:
         assert response.dense_count == 0
         assert response.sparse_count == 0
 
+    def test_intent_weighted_rrf_and_parallel_retrieval(self, test_manager: IndexManager):
+        """Verify intent-weighted RRF and concurrent execution."""
+        retriever = HybridRetriever(index_manager=test_manager)
+        # Factual query with explicit numbers/code
+        resp = retriever.retrieve("20 days annual vacation 2024")
+        assert resp.total_candidates > 0
+        assert resp.execution_time_ms > 0
+        # First candidate should be vacation policy
+        assert "vacation" in resp.candidates[0].content.lower()
+
+    def test_semantic_query_cache(self, test_manager: IndexManager):
+        """Verify that semantic query caching returns cached responses for identical/near-identical queries."""
+        retriever = HybridRetriever(index_manager=test_manager)
+        q = "What is the annual leave and vacation allowance?"
+        resp1 = retriever.retrieve(q)
+        assert resp1.total_candidates > 0
+        assert len(retriever._semantic_cache) > 0
+
+        # Exact repeat hit
+        resp2 = retriever.retrieve(q)
+        assert resp2.total_candidates == resp1.total_candidates
+        assert resp2.candidates[0].chunk_id == resp1.candidates[0].chunk_id
+
 
 class TestHybridRetrievalAPI:
     """Tests FastAPI REST endpoints for hybrid retrieval."""

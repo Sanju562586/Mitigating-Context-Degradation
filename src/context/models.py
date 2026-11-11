@@ -59,6 +59,10 @@ class CompactionRequest(BaseModel):
         le=16000,
         description="Target maximum token allowance for the compacted prompt context.",
     )
+    intent: str | None = Field(
+        default=None,
+        description="Optional detected query intent for adaptive budget sizing (e.g. FACTUAL, COMPARISON, SUMMARY).",
+    )
     enable_sentence_pruning: bool = Field(
         default=True,
         description="Whether to perform sentence-level salience extraction.",

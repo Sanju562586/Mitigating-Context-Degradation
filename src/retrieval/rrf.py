@@ -27,6 +27,8 @@ class RRFEngine:
         sparse_results: list[tuple[str, float]],
         top_k: int = 20,
         rrf_k: int = 60,
+        dense_weight: float = 1.0,
+        sparse_weight: float = 1.0,
         metadata_store: MetadataStore | None = None,
     ) -> list[RetrievedCandidate]:
         """Merge dense and sparse search rankings into a single unified candidate pool.
@@ -36,6 +38,8 @@ class RRFEngine:
             sparse_results: Ordered list of (chunk_id, bm25_score) from sparse retrieval.
             top_k: Maximum number of fused candidates to return.
             rrf_k: Smoothing constant k (default 60).
+            dense_weight: Multiplier weight for dense rankings (default 1.0).
+            sparse_weight: Multiplier weight for sparse rankings (default 1.0).
             metadata_store: Optional metadata store to override instance store.
 
         Returns:
@@ -47,7 +51,7 @@ class RRFEngine:
         candidates_map: dict[str, dict[str, Any]] = {}
 
         def _record_candidate(
-            chunk_id: str, rank: int, score: float, prefix: str
+            chunk_id: str, rank: int, score: float, prefix: str, weight: float = 1.0
         ) -> None:
             if chunk_id not in candidates_map:
                 candidates_map[chunk_id] = {
@@ -60,15 +64,15 @@ class RRFEngine:
             entry = candidates_map[chunk_id]
             entry[f"{prefix}_rank"] = rank
             entry[f"{prefix}_score"] = score
-            entry["rrf_score"] += 1.0 / (rrf_k + rank)
+            entry["rrf_score"] += weight * (1.0 / (rrf_k + rank))
 
         # 1. Process dense rankings (1-indexed)
         for rank_idx, (chunk_id, score) in enumerate(dense_results, start=1):
-            _record_candidate(chunk_id, rank_idx, score, "dense")
+            _record_candidate(chunk_id, rank_idx, score, "dense", weight=dense_weight)
 
         # 2. Process sparse rankings (1-indexed)
         for rank_idx, (chunk_id, score) in enumerate(sparse_results, start=1):
-            _record_candidate(chunk_id, rank_idx, score, "sparse")
+            _record_candidate(chunk_id, rank_idx, score, "sparse", weight=sparse_weight)
 
         # 3. Sort candidates descending by RRF score (secondary sort by normalized scores for stability)
         max_sparse = max(

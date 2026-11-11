@@ -158,6 +158,37 @@ class TestCrossEncoderReranker:
         assert result.pruned_count == 0
         assert len(result.chunks) == 0
 
+    def test_cascaded_reranking_prunes_candidate_slice(self, mock_candidates):
+        """Verify that cascaded reranking only cross-encodes top candidates."""
+        # Create pool of 6 candidates (duplicating mock_candidates)
+        many_candidates = mock_candidates + [
+            c.model_copy(update={"chunk_id": f"{c.chunk_id}_copy"}) for c in mock_candidates
+        ]
+        # Evaluate with max_cross_encoder_candidates=2
+        result = default_reranker.rerank(
+            query="vacation leave",
+            candidates=many_candidates,
+            max_cross_encoder_candidates=2,
+            top_n=5,
+        )
+        # Only up to 2 candidates should have been evaluated and retained
+        assert len(result.chunks) <= 2
+
+    def test_score_margin_relative_cutoff(self, mock_candidates):
+        """Verify relative score-margin cutoff prunes candidates dropping far below top candidate."""
+        result = default_reranker.rerank(
+            query="How many days of paid vacation do employees receive annually?",
+            candidates=mock_candidates,
+            threshold=0.0,
+            score_margin=0.6,
+            top_n=5,
+        )
+        assert len(result.chunks) >= 1
+        retained_ids = [c.chunk_id for c in result.chunks]
+        assert "chunk_leave_policy" in retained_ids
+        # Low scoring biology distractor should be pruned by relative score margin
+        assert "chunk_distractor_irrelevant" not in retained_ids
+
 
 class TestEndToEndHybridAndRerankPipeline:
     """Tests chaining Module 3 Hybrid Retrieval directly into Module 4 Cross-Encoder Reranker."""

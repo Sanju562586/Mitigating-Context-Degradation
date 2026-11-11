@@ -35,10 +35,11 @@ class CrossEncoderReranker:
     """Reranks and prunes candidates using joint cross-attention and score calibration.
 
     Key Sub-Components:
-      1. Pairwise Cross-Attention (cross-encoder/ms-marco-MiniLM-L-6-v2)
-      2. Score Normalization & Calibration (Sigmoid / Min-Max into [0, 1])
-      3. Hard Cutoff Pruning (drops candidates with relevance s < tau, default 0.35)
-      4. Top-N Retention (preserves top 3 to 5 highest-confidence chunks for LLM prompt context)
+      1. Cascaded Reranking (prunes candidate pool before deep cross-encoder evaluation)
+      2. Pairwise Cross-Attention (cross-encoder/ms-marco-MiniLM-L-6-v2)
+      3. Score Normalization & Calibration (Sigmoid / Min-Max into [0, 1])
+      4. Hard Cutoff & Dynamic Score-Margin Pruning (drops candidates with s < tau or far below top score)
+      5. Top-N Retention (preserves top 3 to 5 highest-confidence chunks for LLM prompt context)
     """
 
     def __init__(
@@ -46,10 +47,14 @@ class CrossEncoderReranker:
         engine: CrossEncoderEngine | None = None,
         default_threshold: float = 0.15,
         default_top_n: int = 20,
+        max_cross_encoder_candidates: int = 20,
+        default_score_margin: float | None = None,
     ) -> None:
         self.engine = engine or default_cross_encoder_engine
         self.default_threshold = default_threshold
         self.default_top_n = default_top_n
+        self.max_cross_encoder_candidates = max_cross_encoder_candidates
+        self.default_score_margin = default_score_margin
 
     @staticmethod
     def sigmoid(logits: np.ndarray) -> np.ndarray:
@@ -84,15 +89,19 @@ class CrossEncoderReranker:
         threshold: float | None = None,
         top_n: int | None = None,
         normalization: str = "sigmoid",
+        score_margin: float | None = None,
+        max_cross_encoder_candidates: int | None = None,
     ) -> RankedContext:
         """Score, calibrate, and aggressively prune candidates into a high-precision RankedContext.
 
         Args:
             query: Search query string.
             candidates: Retrieved candidates from Module 3 (e.g. Top-20 RRF pool).
-            threshold: Hard cutoff threshold tau (default 0.35).
-            top_n: Maximum number of retained chunks (default 5).
+            threshold: Hard cutoff threshold tau (default 0.15).
+            top_n: Maximum number of retained chunks (default 20).
             normalization: Score calibration function ('sigmoid' or 'min_max').
+            score_margin: Relative cutoff factor (keep candidates with score >= top_score * margin).
+            max_cross_encoder_candidates: Max top RRF candidates to evaluate through cross-encoder.
 
         Returns:
             RankedContext containing top-N high-precision chunks and pruning telemetry.
@@ -100,6 +109,9 @@ class CrossEncoderReranker:
         start_time = time.perf_counter()
         tau = self.default_threshold if threshold is None else threshold
         n = self.default_top_n if top_n is None else top_n
+        margin = (
+            self.default_score_margin if score_margin is None else score_margin
+        )
 
         total_input = len(candidates)
         if total_input == 0:
@@ -115,19 +127,31 @@ class CrossEncoderReranker:
                 execution_time_ms=round(elapsed_ms, 2),
             )
 
-        # 1. Clean query of framing noise for cross-attention scoring
-        attention_query = clean_query_for_reranking(query)
-        pairs = [(attention_query, c.content) for c in candidates]
+        # 1. Cascaded Reranking: evaluate only top candidate slice to cut cross-attention latency
+        max_eval = (
+            max_cross_encoder_candidates
+            if max_cross_encoder_candidates is not None
+            else self.max_cross_encoder_candidates
+        )
+        eval_candidates = (
+            candidates[:max_eval]
+            if max_eval is not None and len(candidates) > max_eval
+            else candidates
+        )
 
-        # 2. Compute raw all-to-all cross-attention logits
+        # 2. Clean query of framing noise for cross-attention scoring
+        attention_query = clean_query_for_reranking(query)
+        pairs = [(attention_query, c.content) for c in eval_candidates]
+
+        # 3. Compute raw cross-attention logits
         raw_logits = self.engine.predict(pairs)
 
-        # 3. Calibrate scores into probabilities s in [0, 1]
+        # 4. Calibrate scores into probabilities s in [0, 1]
         calibrated_scores = self.calibrate(raw_logits, method=normalization)
 
-        # 4. Associate scores with initial ranks
+        # 5. Associate scores with initial ranks
         scored_candidates = []
-        for idx, candidate in enumerate(candidates):
+        for idx, candidate in enumerate(eval_candidates):
             scored_candidates.append(
                 {
                     "candidate": candidate,
@@ -138,21 +162,34 @@ class CrossEncoderReranker:
                 }
             )
 
-        # 5. Sort candidates descending by calibrated cross-encoder score
+        # 6. Sort candidates descending by calibrated cross-encoder score
         scored_candidates.sort(key=lambda item: item["rerank_score"], reverse=True)
 
-        # 6. Candidate Pruning Layer: Retain up to top-N (20) chunks, prioritizing s >= tau
-        retained_chunks: list[RerankedChunk] = []
-        qualifying = [item for item in scored_candidates if item["rerank_score"] >= tau]
-        if len(qualifying) < n:
-            qualifying_ids = {id(item) for item in qualifying}
-            remaining = [
-                item for item in scored_candidates if id(item) not in qualifying_ids
-            ]
-            selected = qualifying + remaining[: (n - len(qualifying))]
-        else:
-            selected = qualifying[:n]
+        # 7. Candidate Pruning Layer: Retain up to top-N chunks with s >= tau
+        qualifying = [
+            item for item in scored_candidates if item["rerank_score"] >= tau
+        ]
 
+        # Dynamic Score-Margin Pruning: Drop candidates that drop sharply below the top leader.
+        # cutoff = top_score - margin ensures candidates more than `margin` points below the
+        # top score are pruned (e.g. margin=0.40 → drop anything >0.40 below the top).
+        if qualifying and margin is not None and margin > 0.0:
+            top_score = qualifying[0]["rerank_score"]
+            cutoff = top_score - margin
+            qualifying = [
+                item for item in qualifying if item["rerank_score"] >= cutoff
+            ]
+
+        # Select top-N from qualifying (or fallback to top 1 if default threshold and nothing qualified)
+        if qualifying:
+            selected = qualifying[:n]
+        elif threshold is not None:
+            # Explicit threshold was provided and nothing qualified
+            selected = []
+        else:
+            selected = scored_candidates[:1]
+
+        retained_chunks: list[RerankedChunk] = []
         for rank_idx, item in enumerate(selected):
             c: RetrievedCandidate = item["candidate"]
             retained_chunks.append(

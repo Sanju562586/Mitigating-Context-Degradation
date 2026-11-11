@@ -81,3 +81,46 @@ class ContextDeduplicator:
                 seen_sentence_terms.append(current_terms)
 
         return unique_sentences, pruned_count
+
+    def strip_seam_overlap(
+        self,
+        prev_chunk_text: str,
+        curr_chunk_text: str,
+        similarity_threshold: float = 0.70,
+    ) -> str:
+        """Strip redundant trailing-to-leading seam overlap between two consecutive chunks.
+
+        When consecutive chunks (chunk N and chunk N+1) are both admitted into the prompt,
+        this eliminates duplicate overlapping sentences at the beginning of chunk N+1.
+        """
+        if not prev_chunk_text or not curr_chunk_text:
+            return curr_chunk_text
+
+        prev_sentences = [
+            s.strip() for s in re.split(r"(?<=[.!?])\s+", prev_chunk_text) if s.strip()
+        ]
+        curr_sentences = [
+            s.strip() for s in re.split(r"(?<=[.!?])\s+", curr_chunk_text) if s.strip()
+        ]
+        if not prev_sentences or not curr_sentences:
+            return curr_chunk_text
+
+        # Compare trailing sentences of prev against leading sentences of curr
+        prev_tail_terms = [self._to_term_set(s) for s in prev_sentences[-3:]]
+
+        prune_idx = 0
+        for s in curr_sentences[:3]:
+            curr_terms = self._to_term_set(s)
+            if not curr_terms:
+                continue
+            if any(
+                self.jaccard_similarity(curr_terms, p_terms) >= similarity_threshold
+                for p_terms in prev_tail_terms
+            ):
+                prune_idx += 1
+            else:
+                break
+
+        if prune_idx > 0 and prune_idx < len(curr_sentences):
+            return " ".join(curr_sentences[prune_idx:]).strip()
+        return curr_chunk_text

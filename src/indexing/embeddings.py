@@ -34,7 +34,10 @@ class EmbeddingEngine:
     def model(self) -> SentenceTransformer:
         """Lazy-load the sentence-transformers model."""
         if self._model is None:
-            self._model = SentenceTransformer(self.model_name)
+            try:
+                self._model = SentenceTransformer(self.model_name, local_files_only=True)
+            except Exception:
+                self._model = SentenceTransformer(self.model_name)
         return self._model
 
     @property
