@@ -32,6 +32,8 @@ def retrieve_hybrid(payload: RetrievalRequest) -> RetrievalResponse:
         top_k_sparse=payload.top_k_sparse,
         top_k_fused=payload.top_k_fused,
         rrf_k=payload.rrf_k,
+        dense_weight=payload.dense_weight,
+        sparse_weight=payload.sparse_weight,
     )
 
 

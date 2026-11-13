@@ -681,11 +681,17 @@ class FallbackInferenceEngine(BaseInferenceEngine):
                     prompt, system_prompt, temperature, max_tokens
                 )
                 first_token = next(token_iterator, None)
+                if first_token is None:
+                    logger.warning(
+                        f"[FallbackEngine] Stream with {engine.name} produced no tokens. Cascading..."
+                    )
+                    errors.append(f"{engine.name}: empty stream")
+                    continue
+
                 self._last_used_engine = engine
                 stream_started = True
 
-                if first_token is not None:
-                    yield first_token
+                yield first_token
                 for token in token_iterator:
                     yield token
                 return

@@ -140,3 +140,59 @@ class QueryRewriter:
         # Normalize redundant spaces
         tokens = [t for t in q.split() if t]
         return " ".join(tokens)
+
+    def distill(self, query: str) -> str:
+        """Alias for distill_search_query."""
+        return self.distill_search_query(query)
+
+    def generate_hyde_passage(self, query: str, intent: str | None = None) -> str:
+        """Synthesize a hypothetical declarative document passage (HyDE).
+
+        Converts questions into declarative document assertions that align
+        closely with the semantic vector space of index documents.
+        """
+        distilled = self.distill_search_query(query)
+        if not distilled:
+            return query
+
+        # Formulate affirmative declarative context
+        if intent and intent.lower() in ("factual", "informational"):
+            return (
+                f"The official documentation states regarding {distilled} that all guidelines, "
+                f"requirements, standards, and procedures are defined and maintained for compliance."
+            )
+        if intent and intent.lower() == "comparison":
+            return (
+                f"A detailed comparison regarding {distilled} outlines the key differences, "
+                f"tradeoffs, performance metrics, and recommended usage patterns across both options."
+            )
+        return (
+            f"Regarding {distilled}, the document provides specific instructions, rules, "
+            f"operational parameters, and essential reference details."
+        )
+
+    def generate_query_expansions(self, query: str) -> list[str]:
+        """Generate alternative keyword and semantic query formulations to boost recall."""
+        distilled = self.distill_search_query(query)
+        expansions = [query]
+        if distilled and distilled != query:
+            expansions.append(distilled)
+
+        # Common domain synonym expansions
+        synonyms = {
+            "vacation": "annual leave paid time off",
+            "leave": "time off absence policy",
+            "bonus": "compensation incentive payment",
+            "salary": "compensation wage rate",
+            "authentication": "auth bearer token credentials",
+            "deploy": "deployment release pipeline",
+        }
+        for word, syn in synonyms.items():
+            if re.search(rf"\b{word}\b", distilled, re.IGNORECASE):
+                expanded = re.sub(
+                    rf"\b{word}\b", f"{word} {syn}", distilled, flags=re.IGNORECASE
+                )
+                expansions.append(expanded)
+                break
+
+        return expansions

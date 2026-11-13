@@ -305,6 +305,14 @@ The local API does not require user authentication. Documents and memory are ava
 
 The **Evaluate** tab runs annotated query sets against the live application indexes and pipeline, compares BM25, dense FAISS, RRF, cross-encoder reranking, conventional dense RAG, and the full pipeline, and displays per-query answers plus aggregate metrics. Export per-query CSV and IEEE-ready LaTeX from the UI. The CLI runner is also available for repeatable offline experiments. The JSONL annotation format, API endpoint, and run instructions are documented in [`docs/evaluation.md`](docs/evaluation.md). Retrieval scores require chunk-level relevance judgments; QA scores require gold answers.
 
+Run the staged sentence-pruning and deduplication ablation against the local evaluation set and index with:
+
+```powershell
+python scripts\run_context_ablation.py --output results\context-ablation-run
+```
+
+The output directory must not already exist. The script uses the existing JSONL query set, FAISS/BM25 index, and deterministic offline answer synthesizer.
+
 ## 🧪 Testing & Verification
 
 The project includes **15 comprehensive test suites** covering all modular subsystems:

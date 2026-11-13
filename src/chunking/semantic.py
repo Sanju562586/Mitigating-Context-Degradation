@@ -63,6 +63,23 @@ _COMMON_STOP_WORDS = {
     "our",
 }
 
+_ALPHANUM_REGEX = re.compile(r"[a-zA-Z0-9]+")
+_DECIMAL_REGEX = re.compile(r"(\d+)\.(\d+)")
+_LIST_DOT_REGEX = re.compile(r"(?<=\b\d)\.(?=\s+)")
+_SENTENCE_SPLIT_REGEX = re.compile(r"(?<=[.!?])\s+")
+_STRUCTURE_REGEX = re.compile(
+    r"^(?:Module\s+Schedule|Schedule|Modules|Topics|Overview|Agenda|•|-|\*|\d+[\.\)])",
+    re.IGNORECASE,
+)
+_SUFFIXES = ("ing", "tion", "ment", "able", "ness", "ity", "ed", "ly", "es", "s")
+
+
+def _stem_word(w: str) -> str:
+    for suf in _SUFFIXES:
+        if w.endswith(suf) and len(w) > len(suf) + 3:
+            return w[: -len(suf)]
+    return w
+
 
 class SemanticChunker:
     """Chunks documents along semantic boundaries using semantic similarity and breakpoint detection,
@@ -78,7 +95,7 @@ class SemanticChunker:
         min_tokens: int | None = None,
         similarity_threshold: float = 0.05,
         embedding_engine: Any | None = None,
-        use_embeddings: bool = True,
+        use_embeddings: bool = False,
     ) -> None:
         self.target_tokens = target_tokens
         self.overlap_tokens = overlap_tokens
@@ -90,6 +107,8 @@ class SemanticChunker:
         self.similarity_threshold = similarity_threshold
         self._embedding_engine = embedding_engine
         self.use_embeddings = use_embeddings
+        self._sentence_embedding_cache: dict[str, Any] = {}
+        self._term_vector_cache: dict[str, tuple[Counter[str], float]] = {}
 
     def _get_embedding_engine(self) -> Any | None:
         if self._embedding_engine is not None:
@@ -106,66 +125,72 @@ class SemanticChunker:
     def compute_sentence_similarity(self, s1: str, s2: str) -> float:
         """Compute semantic similarity between two sentences in [0.0, 1.0].
 
-        Uses neural sentence embeddings when an embedding engine is available/configured,
-        or high-performance lexical-semantic term vector cosine similarity as fallback.
+        Uses neural sentence embeddings with caching when use_embeddings=True,
+        or high-performance lexical-semantic term vector cosine similarity as default.
         """
-        if not s1.strip() or not s2.strip():
+        s1_strip = s1.strip()
+        s2_strip = s2.strip()
+        if not s1_strip or not s2_strip:
             return 0.0
 
-        engine = self._get_embedding_engine()
-        if engine is not None:
-            try:
-                import numpy as np
+        if self.use_embeddings:
+            engine = self._get_embedding_engine()
+            if engine is not None:
+                try:
+                    import numpy as np
 
-                vecs = engine.embed_texts([s1, s2])
-                sim = float(np.dot(vecs[0], vecs[1]))
-                return max(0.0, min(1.0, sim))
-            except Exception:
-                pass
+                    v1 = self._sentence_embedding_cache.get(s1_strip)
+                    v2 = self._sentence_embedding_cache.get(s2_strip)
+                    missing: list[str] = []
+                    if v1 is None:
+                        missing.append(s1_strip)
+                    if v2 is None and s2_strip != s1_strip:
+                        missing.append(s2_strip)
+                    if missing:
+                        vecs = engine.embed_texts(missing)
+                        if len(self._sentence_embedding_cache) >= 10000:
+                            self._sentence_embedding_cache.clear()
+                        for m_text, m_vec in zip(missing, vecs):
+                            self._sentence_embedding_cache[m_text] = m_vec
+                        if v1 is None:
+                            v1 = self._sentence_embedding_cache[s1_strip]
+                        if v2 is None:
+                            v2 = self._sentence_embedding_cache[s2_strip]
+                    sim = float(np.dot(v1, v2))
+                    return max(0.0, min(1.0, sim))
+                except Exception:
+                    pass
 
         # Fast lexical-semantic cosine similarity with stop-word filtering & stemming
-        def _stem(w: str) -> str:
-            for suf in (
-                "ing",
-                "tion",
-                "ment",
-                "able",
-                "ness",
-                "ity",
-                "ed",
-                "ly",
-                "es",
-                "s",
-            ):
-                if w.endswith(suf) and len(w) > len(suf) + 3:
-                    return w[: -len(suf)]
-            return w
-
-        def _to_term_vector(text: str) -> Counter[str]:
-            raw_tokens = re.findall(r"[a-zA-Z0-9]+", text.lower())
-            meaningful = [
-                _stem(tok)
-                for tok in raw_tokens
-                if len(tok) > 1 and tok not in _COMMON_STOP_WORDS
-            ]
-            return Counter(meaningful)
-
-        v1 = _to_term_vector(s1)
-        v2 = _to_term_vector(s2)
-        if not v1 or not v2:
-            return 0.0
-
-        common_keys = set(v1.keys()) & set(v2.keys())
-        if not common_keys:
-            return 0.0
-
-        dot_product = sum(v1[k] * v2[k] for k in common_keys)
-        norm1 = math.sqrt(sum(v**2 for v in v1.values()))
-        norm2 = math.sqrt(sum(v**2 for v in v2.values()))
+        v1, norm1 = self._get_term_vector_and_norm(s1_strip)
+        v2, norm2 = self._get_term_vector_and_norm(s2_strip)
         if norm1 == 0 or norm2 == 0:
             return 0.0
 
+        if len(v1) < len(v2):
+            dot_product = sum(cnt * v2.get(k, 0) for k, cnt in v1.items())
+        else:
+            dot_product = sum(cnt * v1.get(k, 0) for k, cnt in v2.items())
+
         return max(0.0, min(1.0, dot_product / (norm1 * norm2)))
+
+    def _get_term_vector_and_norm(self, text: str) -> tuple[Counter[str], float]:
+        cached = self._term_vector_cache.get(text)
+        if cached is not None:
+            return cached
+
+        raw_tokens = _ALPHANUM_REGEX.findall(text.lower())
+        meaningful = [
+            _stem_word(tok)
+            for tok in raw_tokens
+            if len(tok) > 1 and tok not in _COMMON_STOP_WORDS
+        ]
+        v = Counter(meaningful)
+        norm = math.sqrt(sum(c * c for c in v.values())) if v else 0.0
+        if len(self._term_vector_cache) >= 15000:
+            self._term_vector_cache.clear()
+        self._term_vector_cache[text] = (v, norm)
+        return v, norm
 
     def chunk_elements(
         self,
@@ -315,13 +340,7 @@ class SemanticChunker:
                 # Check semantic breakpoint if we have accumulated enough tokens
                 semantic_break = False
                 if last_sentence is not None and current_token_count >= self.min_tokens:
-                    is_structure = bool(
-                        re.search(
-                            r"^(?:Module\s+Schedule|Schedule|Modules|Topics|Overview|Agenda|•|-|\*|\d+[\.\)])",
-                            sentence.strip(),
-                            re.IGNORECASE,
-                        )
-                    )
+                    is_structure = bool(_STRUCTURE_REGEX.search(sentence.strip()))
                     if not is_structure:
                         sim = self.compute_sentence_similarity(last_sentence, sentence)
                         if sim < self.similarity_threshold:
@@ -447,6 +466,7 @@ class SemanticChunker:
             content=content,
             char_count=len(content),
             word_count=len(content.split()),
+            token_count=tokens,
             page_numbers=sorted(pages),
             section_titles=sorted(sections),
             metadata=meta,
@@ -520,6 +540,7 @@ class SemanticChunker:
                     content=content,
                     char_count=len(content),
                     word_count=len(content.split()),
+                    token_count=tokens,
                     metadata=meta,
                 )
                 chunks.append(chunk)
@@ -558,6 +579,7 @@ class SemanticChunker:
                 content=content,
                 char_count=len(content),
                 word_count=len(content.split()),
+                token_count=tokens,
                 metadata=meta,
             )
             chunks.append(chunk)
@@ -570,25 +592,33 @@ class SemanticChunker:
         if not text.strip():
             return []
 
+        # Fast path: if no sentence punctuation, return as single sentence
+        if "." not in text and "?" not in text and "!" not in text:
+            return [text.strip()]
+
         protected = text
         for idx, abbr in enumerate(_PROTECTED_ABBREVIATIONS):
-            protected = protected.replace(abbr, f"__ABBR_{idx}__")
+            if abbr in protected:
+                protected = protected.replace(abbr, f"__ABBR_{idx}__")
 
         # Protect decimal numbers e.g. 3.14 -> 3__DOT__14
-        protected = re.sub(r"(\d+)\.(\d+)", r"\1__DOT__\2", protected)
-        # Protect numbered list items e.g. 1. Item -> 1__LISTDOT__ Item
-        protected = re.sub(r"(?<=\b\d)\.(?=\s+)", "__LISTDOT__", protected)
+        if "." in protected:
+            protected = _DECIMAL_REGEX.sub(r"\1__DOT__\2", protected)
+            # Protect numbered list items e.g. 1. Item -> 1__LISTDOT__ Item
+            protected = _LIST_DOT_REGEX.sub("__LISTDOT__", protected)
 
         # Split on sentence boundaries: period, question mark, or exclamation mark followed by whitespace
-        parts = re.split(r"(?<=[.!?])\s+", protected)
+        parts = _SENTENCE_SPLIT_REGEX.split(protected)
         results: list[str] = []
         for part in parts:
             part = part.strip()
             if not part:
                 continue
-            for idx, abbr in enumerate(_PROTECTED_ABBREVIATIONS):
-                part = part.replace(f"__ABBR_{idx}__", abbr)
-            part = part.replace("__DOT__", ".").replace("__LISTDOT__", ".")
+            if "__ABBR_" in part:
+                for idx, abbr in enumerate(_PROTECTED_ABBREVIATIONS):
+                    part = part.replace(f"__ABBR_{idx}__", abbr)
+            if "__DOT__" in part or "__LISTDOT__" in part:
+                part = part.replace("__DOT__", ".").replace("__LISTDOT__", ".")
             results.append(part)
 
         return results
@@ -601,5 +631,99 @@ class SemanticChunker:
             chunk.metadata["prev_chunk_id"] = prev_id
             chunk.metadata["next_chunk_id"] = next_id
 
+    def create_small_to_big_chunks(
+        self,
+        parent_chunks: list[DocumentChunk],
+        child_target_tokens: int = 100,
+        child_overlap_tokens: int = 20,
+    ) -> list[DocumentChunk]:
+        """Decompose parent chunks into granular child chunks for Small-to-Big retrieval.
 
-default_semantic_chunker = SemanticChunker(target_tokens=350, overlap_tokens=50)
+        Child chunks provide sharp, focused embeddings with high semantic proximity,
+        while carrying pointers to their full parent context to avoid context degradation.
+        """
+        all_child_chunks: list[DocumentChunk] = []
+
+        for parent in parent_chunks:
+            sentences = self._split_into_sentences(parent.content)
+            if not sentences or count_tokens(parent.content) <= child_target_tokens:
+                child = parent.model_copy(deep=True)
+                child.parent_id = parent.id
+                child.parent_content = parent.content
+                child.is_child = True
+                child.metadata["parent_id"] = parent.id
+                all_child_chunks.append(child)
+                continue
+
+            current_sentences: list[str] = []
+            curr_tokens = 0
+            sub_idx = 0
+
+            for sent in sentences:
+                s_tok = count_tokens(sent)
+                if current_sentences and (curr_tokens + s_tok > child_target_tokens):
+                    child_text = " ".join(current_sentences)
+                    child_meta = dict(parent.metadata)
+                    child_id = f"{parent.id}_c{sub_idx}"
+                    child_meta["chunk_id"] = child_id
+                    child_meta["parent_id"] = parent.id
+                    child_meta["is_child"] = True
+
+                    child_chunk = DocumentChunk(
+                        id=child_id,
+                        document_id=parent.document_id,
+                        chunk_index=parent.chunk_index,
+                        content=child_text,
+                        char_count=len(child_text),
+                        word_count=len(child_text.split()),
+                        token_count=curr_tokens,
+                        page_numbers=list(parent.page_numbers),
+                        section_titles=list(parent.section_titles),
+                        metadata=child_meta,
+                        parent_id=parent.id,
+                        parent_content=parent.content,
+                        is_child=True,
+                    )
+                    all_child_chunks.append(child_chunk)
+                    sub_idx += 1
+
+                    overlap_text = get_trailing_token_overlap(
+                        child_text, child_overlap_tokens
+                    )
+                    current_sentences = [overlap_text, sent] if overlap_text else [sent]
+                    curr_tokens = count_tokens(" ".join(current_sentences))
+                else:
+                    current_sentences.append(sent)
+                    curr_tokens += s_tok
+
+            if current_sentences:
+                child_text = " ".join(current_sentences)
+                child_meta = dict(parent.metadata)
+                child_id = f"{parent.id}_c{sub_idx}"
+                child_meta["chunk_id"] = child_id
+                child_meta["parent_id"] = parent.id
+                child_meta["is_child"] = True
+
+                child_chunk = DocumentChunk(
+                    id=child_id,
+                    document_id=parent.document_id,
+                    chunk_index=parent.chunk_index,
+                    content=child_text,
+                    char_count=len(child_text),
+                    word_count=len(child_text.split()),
+                    token_count=curr_tokens,
+                    page_numbers=list(parent.page_numbers),
+                    section_titles=list(parent.section_titles),
+                    metadata=child_meta,
+                    parent_id=parent.id,
+                    parent_content=parent.content,
+                    is_child=True,
+                )
+                all_child_chunks.append(child_chunk)
+
+        return all_child_chunks
+
+
+default_semantic_chunker = SemanticChunker(
+    target_tokens=350, overlap_tokens=50, use_embeddings=False
+)

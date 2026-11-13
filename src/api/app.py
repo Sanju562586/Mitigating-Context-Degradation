@@ -46,17 +46,22 @@ def create_app() -> FastAPI:
         "http://localhost:8000",
         "http://127.0.0.1:8000",
     ]
-    origin_regex = re.compile(r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$")
+    origin_regex = re.compile(r"^https?://.*$")
 
     def get_cors_headers(request: Request) -> dict[str, str]:
         origin = request.headers.get("origin")
         if origin and (origin in allowed_origins or origin_regex.match(origin)):
             return {
                 "Access-Control-Allow-Origin": origin,
+                "Access-Control-Allow-Credentials": "true",
                 "Access-Control-Allow-Methods": "*",
                 "Access-Control-Allow-Headers": "*",
             }
-        return {}
+        return {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "*",
+            "Access-Control-Allow-Headers": "*",
+        }
 
     # Starlette ServerErrorMiddleware strips CORS headers on unhandled exceptions.
     # We register explicit exception handlers that always attach CORS headers.
@@ -95,9 +100,11 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allowed_origins,
-        allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$",
+        allow_origin_regex=r"^https?://.*$",
+        allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["*"],
     )
     # Mount routes
     app.include_router(ingestion_router)

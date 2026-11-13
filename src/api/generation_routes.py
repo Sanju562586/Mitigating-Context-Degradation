@@ -68,6 +68,14 @@ class FullQAPipelineRequest(BaseModel):
         le=50,
         description="Maximum candidates retained after Module 4 reranking.",
     )
+    adaptive_pruning: bool = Field(
+        default=True,
+        description="Enable adaptive candidate gating before cross-encoder to accelerate inference.",
+    )
+    enable_hyde: bool = Field(
+        default=False,
+        description="Enable Hypothetical Document Embeddings (HyDE) for closer semantic alignment.",
+    )
     max_token_budget: int = Field(
         default=4000,
         ge=100,
@@ -179,6 +187,7 @@ def run_full_qa_pipeline(payload: FullQAPipelineRequest) -> GenerationResponse:
         conversation_history=payload.conversation_history,
         filters=payload.filters,
         top_k_fused=payload.top_k_fused,
+        enable_hyde=payload.enable_hyde,
     )
 
     # 2. Module 4: Cross-Encoder Reranking & Pruning
@@ -186,6 +195,7 @@ def run_full_qa_pipeline(payload: FullQAPipelineRequest) -> GenerationResponse:
         response=retrieval_res,
         threshold=payload.rerank_threshold,
         top_n=payload.rerank_top_n,
+        adaptive_pruning=payload.adaptive_pruning,
     )
 
     # 3. Module 5: Extractive Context Compaction & Reordering
@@ -367,6 +377,7 @@ def stream_compare_pipeline(payload: FullQAPipelineRequest) -> StreamingResponse
                 )
                 grounded_answer_chunks.append(abstention_text)
                 yield f"event: abstention\ndata: {json.dumps({'answer': abstention_text, 'reason': sufficiency.reasoning})}\n\n"
+                yield f"event: token\ndata: {json.dumps({'token': abstention_text})}\n\n"
             else:
                 prompt = (
                     default_grounded_generator.prompt_synthesizer.synthesize_prompt(
