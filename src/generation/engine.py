@@ -413,7 +413,7 @@ class GeminiEngine(BaseInferenceEngine):
             api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY", "")
         )
         self._model_name = model_name or os.getenv(
-            "GEMINI_MODEL_NAME", "gemini-1.5-flash"
+            "GEMINI_MODEL_NAME", "gemini-3.5-flash-lite"
         )
 
     @property

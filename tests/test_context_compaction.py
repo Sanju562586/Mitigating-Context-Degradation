@@ -57,6 +57,27 @@ class TestSentencePruner:
         assert len(kept) == 1
         assert len(compacted) > 0
 
+    def test_enumerated_list_preservation(self):
+        """Verify that all items in an enumerated list are preserved when relevant."""
+        pruner = SentencePruner(default_min_salience=0.15)
+        query = "What are the fundamental questions that are to be considered about the system regarding architectural design decisions"
+        text = (
+            "Architectural design decisions\n"
+            "Based on their knowledge and experience, they have to consider the following fundamental questions about the system:\n"
+            "1. Is there a generic application architecture that can act as a template for the system that is being designed?\n"
+            "2. How will the system be distributed across a number of cores or processors?\n"
+            "3. What architectural patterns or styles might be used?\n"
+            "4. What will be the fundamental approach used to structure the system?\n"
+            "5. How will the structural components in the system be decomposed into sub components?\n"
+            "6. What strategy will be used to control the operation of the components in the system?\n"
+            "7. What architectural organization is best for delivering the non-functional requirements of the system?\n"
+            "8. How will the architectural design be evaluated?\n"
+            "9. How should the architecture of the system be documented?"
+        )
+        compacted, kept = pruner.prune_chunk(query=query, text=text)
+        for i in range(1, 10):
+            assert f"{i}." in compacted, f"Missing question item {i} in compacted text"
+
 
 class TestContextDeduplicator:
     """Tests chunk seam overlap detection and Jaccard deduplication."""

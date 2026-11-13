@@ -275,18 +275,21 @@ class SentencePruner:
 
     @staticmethod
     def split_sentences(text: str) -> list[str]:
-        """Split text into individual sentences while preserving sentence content."""
+        """Split text into individual sentences while preserving sentence content and numbered lists."""
         if not text or not text.strip():
             return []
 
+        # Protect numbered list markers (e.g. "1. ", "12. ") from erroneous sentence splitting
+        protected = re.sub(r"\b(\d+)\.(\s+)", r"\1__LISTDOT__\2", text)
+
         # First split on line breaks to preserve structural paragraphs
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        lines = [line.strip() for line in protected.splitlines() if line.strip()]
         sentences: list[str] = []
 
         for line in lines:
             parts = _SENTENCE_SPLIT_REGEX.split(line)
             for part in parts:
-                cleaned = part.strip()
+                cleaned = part.replace("__LISTDOT__", ".").strip()
                 if cleaned:
                     sentences.append(cleaned)
 
@@ -311,7 +314,7 @@ class SentencePruner:
             return False
         if s.startswith(("•", "-", "*", ">")):
             return True
-        if re.match(r"^(\d+[\.\)]|\(\d+\))\s+", s):
+        if re.match(r"^(\d+[\.\)]|\(\d+\)|[a-zA-Z][\.\)])\s+", s):
             return True
         if re.search(r"\b(?:Admin|Dev|SME|Module|Superbadge|Project|Demo Link)\b$", s):
             return True
@@ -420,11 +423,7 @@ class SentencePruner:
             if score >= threshold
             or (has_relevant_context and self._is_formula_sentence(sentence))
             or (has_schedule_context and self._is_list_or_schedule_item(sentence))
-            or (
-                has_relevant_context
-                and self._is_list_or_schedule_item(sentence)
-                and len(sentence.split()) <= 15
-            )
+            or (has_relevant_context and self._is_list_or_schedule_item(sentence))
         ]
 
         # Fallback preservation: If no sentence met threshold
