@@ -6,6 +6,7 @@ import pickle
 import re
 from pathlib import Path
 
+import numpy as np
 from rank_bm25 import BM25Plus
 
 # pyrefly: ignore [missing-import]
@@ -83,14 +84,26 @@ class BM25Index:
         if not query_tokens:
             return []
 
-        scores = self._bm25.get_scores(query_tokens)
-        top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
+        raw_scores = self._bm25.get_scores(query_tokens)
+        scores = np.asarray(raw_scores, dtype=np.float32)
+        nonzero_idx = np.flatnonzero(scores > 0)
+        if len(nonzero_idx) == 0:
+            return []
+
+        # Sort only nonzero scores descending using numpy partial sort for efficiency
+        top_k_bound = min(top_k * 8, len(nonzero_idx))
+        if len(nonzero_idx) > top_k_bound:
+            partitioned = np.argpartition(scores[nonzero_idx], -top_k_bound)[-top_k_bound:]
+            candidate_indices = nonzero_idx[partitioned]
+            sorted_order = np.argsort(scores[candidate_indices])[::-1]
+            top_indices = candidate_indices[sorted_order]
+        else:
+            sorted_order = np.argsort(scores[nonzero_idx])[::-1]
+            top_indices = nonzero_idx[sorted_order]
 
         query_set = set(query_tokens)
         results: list[tuple[str, float]] = []
         for idx in top_indices:
-            if scores[idx] <= 0:
-                break
             # Ensure the document actually contains matching terms
             doc_tokens = set(self._tokenized_corpus[idx])
             if query_set.intersection(doc_tokens):

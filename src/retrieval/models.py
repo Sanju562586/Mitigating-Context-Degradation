@@ -79,6 +79,18 @@ class RetrievalRequest(BaseModel):
         ge=1,
         description="RRF smoothing constant preventing high-rank dominance.",
     )
+    dense_weight: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=5.0,
+        description="Optional custom multiplier weight for dense FAISS ranking in RRF.",
+    )
+    sparse_weight: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=5.0,
+        description="Optional custom multiplier weight for sparse BM25 ranking in RRF.",
+    )
 
 
 class RetrievalResponse(BaseModel):

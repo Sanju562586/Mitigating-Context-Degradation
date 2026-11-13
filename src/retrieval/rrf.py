@@ -95,13 +95,14 @@ class RRFEngine:
             reverse=True,
         )
 
-        # 4. Truncate to top_k fused candidates
-        top_items = sorted_chunk_items[:top_k]
-
-        # 5. Hydrate candidates with content and metadata from MetadataStore
+        # 4 & 5. Hydrate candidates with content and metadata from MetadataStore up to top_k
         fused_candidates: list[RetrievedCandidate] = []
-        for chunk_id, stats in top_items:
+        for chunk_id, stats in sorted_chunk_items:
             record = store.get(chunk_id) if store else None
+
+            # When an active store is available, skip ghost IDs not found in the store
+            if store is not None and store.total_chunks > 0 and record is None:
+                continue
 
             content = record.get("content", "") if record else ""
             doc_id = record.get("document_id", "") if record else ""
@@ -121,5 +122,7 @@ class RRFEngine:
                 rrf_score=stats["rrf_score"],
             )
             fused_candidates.append(candidate)
+            if len(fused_candidates) >= top_k:
+                break
 
         return fused_candidates
