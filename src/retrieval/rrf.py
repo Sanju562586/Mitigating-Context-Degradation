@@ -108,6 +108,12 @@ class RRFEngine:
             doc_id = record.get("document_id", "") if record else ""
             chunk_idx = record.get("chunk_index", 0) if record else 0
             metadata = record.get("metadata", {}) if record else {}
+            parent_id = record.get("parent_id") if record else metadata.get("parent_id")
+            parent_content = (
+                record.get("parent_content")
+                if record
+                else metadata.get("parent_content")
+            )
 
             candidate = RetrievedCandidate(
                 chunk_id=chunk_id,
@@ -120,6 +126,8 @@ class RRFEngine:
                 dense_score=stats["dense_score"],
                 sparse_score=stats["sparse_score"],
                 rrf_score=stats["rrf_score"],
+                parent_id=parent_id,
+                parent_content=parent_content,
             )
             fused_candidates.append(candidate)
             if len(fused_candidates) >= top_k:

@@ -2,17 +2,55 @@
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+_CLEAN_WORDS_REGEX = re.compile(r"[\W_]+")
+_YEAR_REGEX = re.compile(r"\b(19\d{2}|20\d{2})\b")
+_TABLE_PIPE_REGEX = re.compile(r"\|.*\|")
+
+_DEPT_MAPPINGS = (
+    ("engineering", "engineering"),
+    ("tech", "engineering"),
+    ("software", "engineering"),
+    ("human resources", "hr"),
+    ("hr", "hr"),
+    ("finance", "finance"),
+    ("accounting", "finance"),
+    ("marketing", "marketing"),
+    ("legal", "legal"),
+    ("operations", "operations"),
+    ("ops", "operations"),
+    ("sales", "sales"),
+    ("product", "product"),
+    ("security", "security"),
+    ("it", "it"),
+)
+
+
+@functools.lru_cache(maxsize=256)
+def _extract_source_metadata(source_name: str) -> tuple[int | None, str | None]:
+    clean_source = _CLEAN_WORDS_REGEX.sub(" ", source_name)
+    year_match = _YEAR_REGEX.search(clean_source)
+    year = int(year_match.group(1)) if year_match else None
+    dept = None
+    clean_source_lower = clean_source.lower()
+    for dept_raw, dept_std in _DEPT_MAPPINGS:
+        if re.search(rf"\b{re.escape(dept_raw)}\b", clean_source_lower):
+            dept = dept_std
+            break
+    return year, dept
+
 
 class MetadataTagger:
     """Tags document chunks with standardized metadata schemas and provenance."""
 
     @staticmethod
+    @functools.lru_cache(maxsize=256)
     def extract_source_slug(source_name: str) -> str:
         """Derive a clean, human-readable slug for chunk ID generation.
 
@@ -213,43 +251,28 @@ class MetadataTagger:
             "char_count": len(content),
             "word_count": len(content.split()),
             "overlap_token_count": overlap_token_count,
-            "has_table": "|" in content and re.search(r"\|.*\|", content) is not None,
+            "has_table": "|" in content and _TABLE_PIPE_REGEX.search(content) is not None,
             "has_code": "```" in content,
         }
 
-        # Auto-extract year if present in source_name or content
-        clean_source = re.sub(r"[\W_]+", " ", source_name)
-        year_match = re.search(r"\b(19\d{2}|20\d{2})\b", clean_source)
-        if not year_match and content:
-            clean_content = re.sub(r"[\W_]+", " ", content[:300])
-            year_match = re.search(r"\b(19\d{2}|20\d{2})\b", clean_content)
-        if year_match:
-            meta["year"] = int(year_match.group(1))
+        # Auto-extract year & department (leveraging cached source metadata)
+        source_year, source_dept = _extract_source_metadata(source_name)
+        if source_year is not None:
+            meta["year"] = source_year
+        elif content:
+            clean_content = _CLEAN_WORDS_REGEX.sub(" ", content[:300])
+            year_match = _YEAR_REGEX.search(clean_content)
+            if year_match:
+                meta["year"] = int(year_match.group(1))
 
-        # Auto-extract department if present in source_name or section
-        search_dept_text = re.sub(
-            r"[\W_]+", " ", f"{source_name} {section or ''}".lower()
-        )
-        for dept_raw, dept_std in (
-            ("engineering", "engineering"),
-            ("tech", "engineering"),
-            ("software", "engineering"),
-            ("human resources", "hr"),
-            ("hr", "hr"),
-            ("finance", "finance"),
-            ("accounting", "finance"),
-            ("marketing", "marketing"),
-            ("legal", "legal"),
-            ("operations", "operations"),
-            ("ops", "operations"),
-            ("sales", "sales"),
-            ("product", "product"),
-            ("security", "security"),
-            ("it", "it"),
-        ):
-            if re.search(rf"\b{re.escape(dept_raw)}\b", search_dept_text):
-                meta["department"] = dept_std
-                break
+        if source_dept is not None:
+            meta["department"] = source_dept
+        elif section:
+            sec_lower = _CLEAN_WORDS_REGEX.sub(" ", section.lower())
+            for dept_raw, dept_std in _DEPT_MAPPINGS:
+                if re.search(rf"\b{re.escape(dept_raw)}\b", sec_lower):
+                    meta["department"] = dept_std
+                    break
 
         if extra:
             for k, v in extra.items():

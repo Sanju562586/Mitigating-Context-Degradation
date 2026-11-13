@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 
@@ -58,7 +60,8 @@ async def upload_document(
                 detail="Uploaded file is empty.",
             )
 
-        doc = default_registry.parse_bytes(
+        doc = await asyncio.to_thread(
+            default_registry.parse_bytes,
             content=content_bytes,
             filename=filename,
             mime_type=file.content_type,
@@ -66,7 +69,10 @@ async def upload_document(
             document_type=document_type,
         )
         # Index chunks: Sentence-Transformers L2 embeddings -> FAISS + BM25 + Metadata Store
-        idx_res = default_index_manager.index_document(doc)
+        idx_res = await asyncio.to_thread(
+            default_index_manager.index_document,
+            doc,
+        )
         # Publish the document only after indexing succeeds, so a failed request
         # cannot leave a document that retrieval cannot find.
         default_store.add(doc)

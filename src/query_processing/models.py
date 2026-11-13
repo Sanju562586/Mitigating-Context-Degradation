@@ -53,6 +53,14 @@ class ProcessedQuery(BaseModel):
     extracted_keywords: list[str] = Field(
         default_factory=list, description="Key domain/entity tokens identified."
     )
+    hyde_passage: str | None = Field(
+        default=None,
+        description="Hypothetical Document Embeddings (HyDE) synthesized passage.",
+    )
+    expanded_queries: list[str] = Field(
+        default_factory=list,
+        description="Paraphrased or expanded query variations.",
+    )
     metadata: dict[str, Any] = Field(
         default_factory=dict, description="Supplementary debugging and trace info."
     )

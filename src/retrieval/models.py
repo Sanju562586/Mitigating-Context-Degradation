@@ -42,6 +42,14 @@ class RetrievedCandidate(BaseModel):
         default=0.0,
         description="Fused Reciprocal Rank Fusion (RRF) score: sum(1 / (k + rank)).",
     )
+    parent_id: str | None = Field(
+        default=None,
+        description="Identifier of parent chunk for small-to-big context expansion.",
+    )
+    parent_content: str | None = Field(
+        default=None,
+        description="Full text of parent chunk for small-to-big context expansion.",
+    )
 
 
 class RetrievalRequest(BaseModel):

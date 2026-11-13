@@ -88,6 +88,13 @@ _STOP_WORDS = {
     "that",
     "these",
     "those",
+    "you",
+    "your",
+    "yours",
+    "we",
+    "us",
+    "our",
+    "ours",
     # Document framing / meta terms
     "document",
     "documents",
@@ -126,6 +133,50 @@ _STOP_WORDS = {
     "listed",
     "lists",
     "listing",
+    "summarize",
+    "summarizes",
+    "summarized",
+    "summarizing",
+    "summary",
+    "summaries",
+    "overview",
+    "overviews",
+    "outline",
+    "outlines",
+    "brief",
+    "briefly",
+    "key",
+    "point",
+    "points",
+    "detail",
+    "details",
+    "main",
+    "topic",
+    "topics",
+    "theme",
+    "themes",
+    "gist",
+    "takeaway",
+    "takeaways",
+    "talk",
+    "talks",
+    "talking",
+    "discuss",
+    "discusses",
+    "discussed",
+    "discussing",
+    "discussion",
+    "tell",
+    "tells",
+    "telling",
+    "say",
+    "says",
+    "saying",
+    "mean",
+    "means",
+    "meaning",
+    "information",
+    "info",
 }
 
 _SEMANTIC_SYNONYMS: dict[str, set[str]] = {
@@ -327,14 +378,26 @@ class EvidenceSufficiencyClassifier:
 
         query_terms = self.extract_informative_terms(query)
         if not query_terms:
-            # Query is purely generic/conversational (e.g. "Hello there")
+            # Query is purely generic/conversational (e.g. "Hello there") or broad document summary/overview
+            is_summary = bool(
+                re.search(
+                    r"\b(summariz|summary|overview|outline|brief|main|topic|gist|takeaway|detail|point|talk|about)\b",
+                    query,
+                    re.IGNORECASE,
+                )
+            )
+            reason = (
+                "Query requests general document overview/summary."
+                if is_summary
+                else "Query contains conversational greeting without specific factual constraint."
+            )
             return SufficiencyAssessment(
                 is_sufficient=True,
                 sufficiency_score=1.0,
                 threshold=tau,
                 topic=topic,
                 abstention_message=None,
-                reasoning="Query contains conversational greeting without specific factual constraint.",
+                reasoning=reason,
                 matched_aspects=[],
                 missing_aspects=[],
             )

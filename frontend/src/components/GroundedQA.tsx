@@ -98,6 +98,7 @@ export const GroundedQA: React.FC<GroundedQAProps> = ({
           onNaive: setNaiveAnswer,
           onContext: (evidence) => onContext(question, evidence),
           onToken: (token) => setGroundedAnswer((current) => current + token),
+          onAbstention: (abstention) => setGroundedAnswer(abstention.answer),
           onDone: () => setStatus(""),
         },
         controller.signal,

@@ -111,6 +111,7 @@ class HybridRetriever:
         rrf_k: int = 60,
         dense_weight: float | None = None,
         sparse_weight: float | None = None,
+        enable_hyde: bool = False,
     ) -> RetrievalResponse:
         """Execute complete hybrid retrieval with pre-flight query processing and RRF fusion.
 
@@ -241,6 +242,21 @@ class HybridRetriever:
             if (query_vec is not None and dense_query.strip().lower() == query.strip().lower())
             else None
         )
+        if enable_hyde and processed_query.hyde_passage:
+            try:
+                base_vec = (
+                    q_vec_for_dense
+                    if q_vec_for_dense is not None
+                    else self.dense_retriever.embedding_engine.embed_query(dense_query)
+                )
+                hyde_vec = self.dense_retriever.embedding_engine.embed_query(
+                    processed_query.hyde_passage
+                )
+                blended = 0.65 * base_vec + 0.35 * hyde_vec
+                q_vec_for_dense = self.dense_retriever.embedding_engine.normalize_l2(blended)
+            except Exception:
+                pass
+
         future_dense = self._executor.submit(
             _exec_dense,
             dense_query,
