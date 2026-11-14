@@ -18,6 +18,25 @@ load_dotenv()
 logger = logging.getLogger("uvicorn.error")
 
 
+_GROQ_MODEL_ALIASES = {
+    "llama-3.3-70b-versatile": "openai/gpt-oss-120b",
+    "llama-3.1-70b-versatile": "openai/gpt-oss-120b",
+    "llama-3.1-8b-instant": "openai/gpt-oss-20b",
+    "llama3-70b-8192": "openai/gpt-oss-120b",
+    "llama3-8b-8192": "openai/gpt-oss-20b",
+}
+
+_GEMINI_MODEL_ALIASES = {
+    "gemini-1.5-flash": "gemini-3.5-flash-lite",
+    "gemini-1.5-flash-latest": "gemini-flash-lite-latest",
+    "gemini-1.5-pro": "gemini-2.5-pro",
+    "gemini-2.0-flash": "gemini-3.5-flash-lite",
+    "gemini-2.0-flash-lite": "gemini-3.5-flash-lite",
+    "gemini-2.5-flash": "gemini-3.5-flash-lite",
+    "gemini-2.5-flash-lite": "gemini-3.5-flash-lite",
+}
+
+
 class BaseInferenceEngine(ABC):
     """Abstract base class for LLM inference providers."""
 
@@ -260,6 +279,18 @@ class OpenAICompatibleEngine(BaseInferenceEngine):
     def is_configured(self) -> bool:
         return not self.requires_api_key or bool(self.api_key and self.api_key.strip())
 
+    def _truncate_prompt_if_needed(self, prompt: str, max_chars: int = 350_000) -> str:
+        """Prevent HTTP 400 context length rejection on massive document inputs."""
+        if len(prompt) > max_chars:
+            logger.warning(
+                f"[{self.name}] Prompt length ({len(prompt)} chars) exceeds safe threshold ({max_chars} chars). Truncating."
+            )
+            return (
+                prompt[:max_chars]
+                + "\n\n[... Warning: Context truncated to fit model context window ...]"
+            )
+        return prompt
+
     def _raise_api_error(self, error: APIConnectionError | APIStatusError) -> NoReturn:
         if isinstance(error, APIConnectionError):
             raise RuntimeError(
@@ -270,6 +301,14 @@ class OpenAICompatibleEngine(BaseInferenceEngine):
             raise RuntimeError(
                 f"LLM API authorization failed (HTTP {error.status_code}) for model '{self._model_name}'. Configure a valid API key or switch to 'Offline (Deterministic)'."
             ) from error
+
+        if error.status_code == 400:
+            err_text = error.response.text[:300] if hasattr(error, "response") else str(error)
+            if any(term in err_text.lower() for term in ("context length", "too large", "maximum context", "tokens")):
+                raise RuntimeError(
+                    f"LLM context limit exceeded for model '{self._model_name}': {err_text}"
+                ) from error
+
         raise RuntimeError(
             f"LLM API error (HTTP {error.status_code}): {error.response.text[:200]}"
         ) from error
@@ -297,9 +336,10 @@ class OpenAICompatibleEngine(BaseInferenceEngine):
         """Generate a completion through LangChain's shared model interface."""
         from langchain_core.messages import HumanMessage, SystemMessage
 
+        safe_prompt = self._truncate_prompt_if_needed(prompt)
         try:
             response = self._chat_model(temperature, max_tokens).invoke(
-                [SystemMessage(content=system_prompt), HumanMessage(content=prompt)]
+                [SystemMessage(content=system_prompt), HumanMessage(content=safe_prompt)]
             )
         except (APIConnectionError, APIStatusError) as error:
             self._raise_api_error(error)
@@ -317,9 +357,10 @@ class OpenAICompatibleEngine(BaseInferenceEngine):
         """Stream completion chunks through the shared LangChain model interface."""
         from langchain_core.messages import HumanMessage, SystemMessage
 
+        safe_prompt = self._truncate_prompt_if_needed(prompt)
         messages = [
             SystemMessage(content=system_prompt),
-            HumanMessage(content=prompt),
+            HumanMessage(content=safe_prompt),
         ]
         try:
             for chunk in self._chat_model(temperature, max_tokens).stream(messages):
@@ -431,9 +472,10 @@ class GeminiEngine(BaseInferenceEngine):
         self.api_key = (
             api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY", "")
         )
-        self._model_name = model_name or os.getenv(
+        raw_model = model_name or os.getenv(
             "GEMINI_MODEL_NAME", "gemini-3.5-flash-lite"
         )
+        self._model_name = _GEMINI_MODEL_ALIASES.get(raw_model, raw_model)
 
     @property
     def model_name(self) -> str:
@@ -446,6 +488,18 @@ class GeminiEngine(BaseInferenceEngine):
     def is_configured(self) -> bool:
         return bool(self.api_key and self.api_key.strip())
 
+    def _truncate_prompt_if_needed(self, prompt: str, max_chars: int = 500_000) -> str:
+        """Prevent context length overflow on massive inputs."""
+        if len(prompt) > max_chars:
+            logger.warning(
+                f"[Gemini] Prompt length ({len(prompt)} chars) exceeds threshold ({max_chars} chars). Truncating."
+            )
+            return (
+                prompt[:max_chars]
+                + "\n\n[... Warning: Context truncated to fit model context window ...]"
+            )
+        return prompt
+
     def generate(
         self,
         prompt: str,
@@ -457,10 +511,11 @@ class GeminiEngine(BaseInferenceEngine):
             raise ValueError("GEMINI_API_KEY is not configured in .env.")
         import httpx
 
+        safe_prompt = self._truncate_prompt_if_needed(prompt)
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self._model_name}:generateContent?key={self.api_key}"
         payload = {
             "system_instruction": {"parts": [{"text": system_prompt}]},
-            "contents": [{"parts": [{"text": prompt}]}],
+            "contents": [{"parts": [{"text": safe_prompt}]}],
             "generationConfig": {
                 "temperature": temperature,
                 "maxOutputTokens": max_tokens,
@@ -468,6 +523,12 @@ class GeminiEngine(BaseInferenceEngine):
         }
         with httpx.Client(timeout=45.0) as client:
             resp = client.post(url, json=payload)
+            if resp.status_code == 404 and self._model_name != "gemini-3.5-flash-lite":
+                logger.warning(
+                    f"[GeminiEngine] Model {self._model_name} returned 404. Falling back to gemini-3.5-flash-lite..."
+                )
+                url_fallback = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key={self.api_key}"
+                resp = client.post(url_fallback, json=payload)
             resp.raise_for_status()
             data = resp.json()
             candidates = data.get("candidates", [])
@@ -488,10 +549,11 @@ class GeminiEngine(BaseInferenceEngine):
 
         import httpx
 
+        safe_prompt = self._truncate_prompt_if_needed(prompt)
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self._model_name}:streamGenerateContent?key={self.api_key}&alt=sse"
         payload = {
             "system_instruction": {"parts": [{"text": system_prompt}]},
-            "contents": [{"parts": [{"text": prompt}]}],
+            "contents": [{"parts": [{"text": safe_prompt}]}],
             "generationConfig": {
                 "temperature": temperature,
                 "maxOutputTokens": max_tokens,
@@ -499,6 +561,28 @@ class GeminiEngine(BaseInferenceEngine):
         }
         with httpx.Client(timeout=45.0) as client:
             with client.stream("POST", url, json=payload) as response:
+                if response.status_code == 404 and self._model_name != "gemini-3.5-flash-lite":
+                    logger.warning(
+                        f"[GeminiEngine] Model {self._model_name} stream returned 404. Falling back to gemini-3.5-flash-lite..."
+                    )
+                    url_fallback = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:streamGenerateContent?key={self.api_key}&alt=sse"
+                    with client.stream("POST", url_fallback, json=payload) as fb_resp:
+                        fb_resp.raise_for_status()
+                        for line in fb_resp.iter_lines():
+                            if not line or not line.startswith("data: "):
+                                continue
+                            try:
+                                data = json.loads(line[len("data: ") :].strip())
+                                candidates = data.get("candidates", [])
+                                if candidates and "content" in candidates[0]:
+                                    for part in candidates[0]["content"].get("parts", []):
+                                        text = part.get("text", "")
+                                        if text:
+                                            yield text
+                            except Exception:
+                                continue
+                    return
+
                 response.raise_for_status()
                 for line in response.iter_lines():
                     if not line:
@@ -528,11 +612,12 @@ class GroqEngine(OpenAICompatibleEngine):
         api_key: str | None = None,
         model_name: str | None = None,
     ) -> None:
+        raw_model = model_name or os.getenv("GROQ_MODEL_NAME", "openai/gpt-oss-120b")
+        resolved_model = _GROQ_MODEL_ALIASES.get(raw_model, raw_model)
         super().__init__(
             base_url="https://api.groq.com/openai/v1",
             api_key=api_key or os.getenv("GROQ_API_KEY", ""),
-            model_name=model_name
-            or os.getenv("GROQ_MODEL_NAME", "llama-3.3-70b-versatile"),
+            model_name=resolved_model,
         )
 
     @property

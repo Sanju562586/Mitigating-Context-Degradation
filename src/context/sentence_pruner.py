@@ -492,6 +492,7 @@ class SentencePruner:
         )
 
         is_in_relevant_list = False
+        in_item_body = False
         kept: list[str] = []
 
         for sentence, score in scored_sentences:
@@ -499,7 +500,7 @@ class SentencePruner:
 
             is_list_lead_in = bool(
                 re.search(
-                    r"(?:following|below|include|considers?|questions?|factors?|steps?):\s*$",
+                    r"(?:following|below|include|includes|considers?|questions?|factors?|steps?|ways?):\s*$",
                     sentence.strip(),
                     re.IGNORECASE,
                 )
@@ -508,9 +509,15 @@ class SentencePruner:
 
             if is_list_lead_in and score >= threshold:
                 is_in_relevant_list = True
+                in_item_body = False
 
-            if not is_list_item and not is_list_lead_in:
+            if is_list_item:
+                in_item_body = has_relevant_context or is_in_relevant_list
+
+            # If we hit a new structural section or heading, reset list state
+            if sentence.startswith(("#", "---")):
                 is_in_relevant_list = False
+                in_item_body = False
 
             if (
                 score >= threshold
@@ -518,6 +525,7 @@ class SentencePruner:
                 or (has_schedule_context and is_list_item)
                 or (has_relevant_context and is_list_item)
                 or (is_in_relevant_list and is_list_item)
+                or (in_item_body and (has_relevant_context or is_in_relevant_list))
             ):
                 kept.append(sentence)
 
