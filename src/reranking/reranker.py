@@ -20,10 +20,12 @@ def clean_query_for_reranking(query: str) -> str:
     """Strip document-framing meta phrases that bias cross-attention away from substantive content."""
     cleaned = query.strip()
     patterns = [
+        r"\b(?:what\s+does\s+(?:the|this)\s+(?:document|doc|file|text|passage|context)\s+say\s+about)\b",
+        r"\b(?:what\s+is\s+(?:the|this)\s+(?:document|doc|file|text|passage|context)\s+about)\b",
+        r"\b(?:summarize|summary\s+of|overview\s+of|details\s+of|key\s+points\s+of)\s+(?:the|this)\s+(?:document|doc|file|text|passage|context)\b",
         r"\b(?:mentioned|stated|listed|given|described|provided|found)\s+in\s+(?:the|this)\s+(?:document|doc|file|text|passage|context)\b",
         r"\baccording\s+to\s+(?:the|this)\s+(?:document|doc|file|text|passage|context)\b",
-        r"\bin\s+(?:the|this)\s+(?:document|doc|file|text|passage|context)\b",
-        r"\bfrom\s+(?:the|this)\s+(?:document|doc|file|text|passage|context)\b",
+        r"\b(?:in|of|from|about)\s+(?:the|this)\s+(?:document|doc|file|text|passage|context)\b",
     ]
     for pattern in patterns:
         cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
@@ -91,6 +93,7 @@ class CrossEncoderReranker:
         normalization: str = "sigmoid",
         score_margin: float | None = None,
         max_cross_encoder_candidates: int | None = None,
+        adaptive_pruning: bool = False,
     ) -> RankedContext:
         """Score, calibrate, and aggressively prune candidates into a high-precision RankedContext.
 
@@ -102,6 +105,7 @@ class CrossEncoderReranker:
             normalization: Score calibration function ('sigmoid' or 'min_max').
             score_margin: Relative cutoff factor (keep candidates with score >= top_score * margin).
             max_cross_encoder_candidates: Max top RRF candidates to evaluate through cross-encoder.
+            adaptive_pruning: Dynamically restrict evaluated pool to top 8-10 candidates if score separation is high.
 
         Returns:
             RankedContext containing top-N high-precision chunks and pruning telemetry.
@@ -133,6 +137,12 @@ class CrossEncoderReranker:
             if max_cross_encoder_candidates is not None
             else self.max_cross_encoder_candidates
         )
+        if adaptive_pruning and len(candidates) > 8:
+            top_rrf = candidates[0].rrf_score
+            eighth_rrf = candidates[min(7, len(candidates) - 1)].rrf_score
+            if top_rrf > 0 and (eighth_rrf / top_rrf) < 0.70:
+                max_eval = min(max_eval, max(8, min(n, 12)))
+
         eval_candidates = (
             candidates[:max_eval]
             if max_eval is not None and len(candidates) > max_eval
@@ -180,14 +190,15 @@ class CrossEncoderReranker:
                 item for item in qualifying if item["rerank_score"] >= cutoff
             ]
 
-        # Select top-N from qualifying (or fallback to top 1 if default threshold and nothing qualified)
+        # Select top-N from qualifying (or fallback to top candidates if default threshold and nothing qualified)
         if qualifying:
             selected = qualifying[:n]
-        elif threshold is not None:
-            # Explicit threshold was provided and nothing qualified
+        elif threshold is not None and threshold != self.default_threshold:
+            # Explicit non-default threshold was provided and nothing qualified
             selected = []
         else:
-            selected = scored_candidates[:1]
+            fallback_k = min(n, 3) if len(scored_candidates) >= 3 else len(scored_candidates)
+            selected = scored_candidates[:fallback_k]
 
         retained_chunks: list[RerankedChunk] = []
         for rank_idx, item in enumerate(selected):
@@ -229,6 +240,7 @@ class CrossEncoderReranker:
             threshold=request.threshold,
             top_n=request.top_n,
             normalization=request.normalization,
+            adaptive_pruning=getattr(request, "adaptive_pruning", False),
         )
 
     def rerank_retrieval_response(
@@ -237,6 +249,7 @@ class CrossEncoderReranker:
         threshold: float | None = None,
         top_n: int | None = None,
         normalization: str = "sigmoid",
+        adaptive_pruning: bool = False,
     ) -> RankedContext:
         """Convenience chaining Module 3 RetrievalResponse into Module 4 reranking."""
         return self.rerank(
@@ -245,6 +258,7 @@ class CrossEncoderReranker:
             threshold=threshold,
             top_n=top_n,
             normalization=normalization,
+            adaptive_pruning=adaptive_pruning,
         )
 
 

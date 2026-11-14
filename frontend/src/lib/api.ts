@@ -296,6 +296,7 @@ export interface StreamCompareCallbacks {
     latency_ms: number;
     metrics_comparison: Record<string, string | number | null>;
   }) => void;
+  onError?: (error: string) => void;
 }
 
 export async function streamQuestionComparison(
@@ -381,6 +382,11 @@ export async function streamQuestionComparison(
         else if (eventType === "naive") callbacks?.onNaive?.(parsed);
         else if (eventType === "context") callbacks?.onContext?.(parsed);
         else if (eventType === "done") callbacks?.onDone?.(parsed);
+        else if (eventType === "error") {
+          const errMsg = parsed.error || "Streaming error";
+          callbacks?.onError?.(errMsg);
+          throw new Error(errMsg);
+        }
       } catch {
         // Skip unparseable malformed frames
       }

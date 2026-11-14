@@ -170,6 +170,13 @@ class DocumentCleaner:
         # 2. Fix split hyphenated words across line breaks (e.g. 'atten-\ntion' -> 'attention')
         text = self.HYPHENATED_LINEBREAK_REGEX.sub(r"\1\2", text)
 
+        # 2b. Rejoin solitary list markers separated by line breaks with their following item text
+        text = re.sub(
+            r"(?m)^(\s*(?:\d+[\.\)]|\(\d+\)|\[\d+\]|[a-zA-Z][\.\)]|\([a-zA-Z]\)|[•\-\*]))\s*\n+\s*([A-Za-z0-9\"\'\(\[])",
+            r"\1 \2",
+            text,
+        )
+
         # 3. Line-by-line processing respecting code blocks and tables
         lines = text.splitlines()
         cleaned_lines: list[str] = []
@@ -275,6 +282,13 @@ class DocumentCleaner:
                 if not next_strip:
                     break
 
+                is_curr_lone_marker = bool(
+                    re.match(
+                        r"^(\d+[\.\)]|\(\d+\)|\[\d+\]|[a-zA-Z][\.\)]|\([a-zA-Z]\)|[•\-\*])$",
+                        curr_strip,
+                    )
+                )
+
                 # Boundary guards
                 if (
                     curr_strip.startswith("```")
@@ -283,12 +297,15 @@ class DocumentCleaner:
                     or self.is_table_row(next_line)
                     or self.is_heading(curr_line)
                     or self.is_heading(next_line)
-                    or self.is_list_item(next_line)
+                    or (self.is_list_item(next_line) and not is_curr_lone_marker)
                 ):
                     break
 
-                # If current line ends with sentence terminal punctuation, do not merge
-                if curr_strip[-1] in (".", "!", "?", ":", ";", ">", "—"):
+                # If current line ends with sentence terminal punctuation, do not merge unless it is a solitary list marker
+                if (
+                    curr_strip[-1] in (".", "!", "?", ":", ";", ">", "—")
+                    and not is_curr_lone_marker
+                ):
                     break
 
                 # Soft wrap detected! Merge next line onto curr_line with a space

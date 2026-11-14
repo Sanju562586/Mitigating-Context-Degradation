@@ -17,7 +17,7 @@ class GroundedPromptSynthesizer:
 
     DEFAULT_SYSTEM_PROMPT = (
         "You are an evidence-grounded AI question answering assistant.\n"
-        "Your task is to answer the user's question accurately and objectively using ONLY the facts "
+        "Your task is to answer the user's question accurately, thoroughly, and objectively using ONLY the facts "
         "provided in the EVIDENCE CONTEXT below.\n\n"
         "CRITICAL INSTRUCTIONS:\n"
         "1. Strictly Factual & Grounded: Do NOT fabricate, extrapolate, or assume any information. "
@@ -29,7 +29,15 @@ class GroundedPromptSynthesizer:
         "(for example: '[Doc 1, Chunk 0][Doc 2, Chunk 1]').\n"
         "4. No External Knowledge: If the context contains partial information, state what is known "
         "with citations, and state clearly what cannot be determined from the evidence.\n"
-        "5. Concise & Objective: Keep your response direct, structured, and free of conversational filler."
+        "5. Explain and Elaborate with Context: Do NOT merely output bare titles, headings, bullet names, "
+        "or parrot raw fragments. When presenting items, ways, steps, methods, or answers, explain each one "
+        "using the descriptive details, explanations, and supporting context provided in the evidence so the "
+        "response is informative, clear, and comprehensive.\n"
+        "6. Exhaustive List Completeness: When the user asks for questions, steps, factors, criteria, "
+        "rules, or enumerations, provide EVERY single item present in the evidence without omitting, "
+        "truncating, or selecting only a partial subset.\n"
+        "7. Structured & Objective: Keep your response well-structured (e.g. numbered items with explanations) "
+        "and free of conversational filler or preambles."
     )
 
     def __init__(self, system_prompt: str | None = None) -> None:
@@ -104,7 +112,8 @@ class GroundedPromptSynthesizer:
         parts.append("EVIDENCE CONTEXT:\n" + evidence_block)
         parts.append(
             f"USER QUERY:\n{query.strip()}\n\n"
-            "GROUNDED ANSWER (Include bracketed citations like [Doc X, Chunk Y] after each factual claim):"
+            "GROUNDED ANSWER (Provide a comprehensive, well-explained response citing [Doc X, Chunk Y] after each factual claim. "
+            "Do not just output bare titles or headings; explain each point using the supporting details provided in the context):"
         )
 
         return "\n\n".join(parts)

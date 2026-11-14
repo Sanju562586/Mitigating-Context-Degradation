@@ -46,6 +46,22 @@ class SparseRetriever:
         if not filters:
             return self.bm25_index.search(query, top_k=top_k)
 
+        # Fast C-native pre-filtering if document_id filter is specified
+        target_doc_id = filters.get("document_id") or filters.get("doc_id")
+        if target_doc_id:
+            pre_filtered = self.bm25_index.search(
+                query, top_k=top_k, doc_id=str(target_doc_id)
+            )
+            if pre_filtered:
+                # Double-check remaining filters if any
+                valid_pre = []
+                for cid, sc in pre_filtered:
+                    rec = self.metadata_store.get(cid)
+                    if rec and self._matches_filters(rec, filters):
+                        valid_pre.append((cid, sc))
+                if valid_pre:
+                    return valid_pre[:top_k]
+
         oversample_k = min(max(top_k * 8, 80), self.bm25_index.total_documents)
         raw_results = self.bm25_index.search(query, top_k=oversample_k)
 

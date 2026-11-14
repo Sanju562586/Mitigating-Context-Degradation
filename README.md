@@ -77,9 +77,10 @@ The system architecture is structured into decoupled, high-performance layers ce
 - **LLM Inference ("Generate Response using Context")**:
   - OpenAI-compatible endpoints (OpenAI, Ollama, Groq, and OpenRouter) use a shared LangChain chat-model adapter for synchronous and streaming inference.
   - **Ollama**: Local, private on-device LLM execution (e.g., Llama 3.2, Mistral).
+  - **Groq**: Uses supported GPT-OSS models; legacy Llama model IDs are remapped.
   - **ChatGPT**: OpenAI API models (`gpt-4o`, `gpt-4o-mini`).
   - **Claude**: Anthropic API models (`claude-3-5-sonnet`, `claude-3-haiku`).
-  - **Gemini**: Google GenAI models (`gemini-1.5-pro`, `gemini-1.5-flash`).
+  - **Gemini**: Google GenAI models (default: `gemini-3.5-flash-lite`; legacy IDs are remapped).
   - **Offline Grounded Synthesizer**: High-speed, deterministic offline inference without external keys or network dependencies.
 
 ### 4. External Memory (Vector Database)
@@ -304,6 +305,14 @@ The local API does not require user authentication. Documents and memory are ava
 ## 📊 Research Evaluation
 
 The **Evaluate** tab runs annotated query sets against the live application indexes and pipeline, compares BM25, dense FAISS, RRF, cross-encoder reranking, conventional dense RAG, and the full pipeline, and displays per-query answers plus aggregate metrics. Export per-query CSV and IEEE-ready LaTeX from the UI. The CLI runner is also available for repeatable offline experiments. The JSONL annotation format, API endpoint, and run instructions are documented in [`docs/evaluation.md`](docs/evaluation.md). Retrieval scores require chunk-level relevance judgments; QA scores require gold answers.
+
+Run the staged sentence-pruning and deduplication ablation against the local evaluation set and index with:
+
+```powershell
+python scripts\run_context_ablation.py --output results\context-ablation-run
+```
+
+The output directory must not already exist. The script uses the existing JSONL query set, FAISS/BM25 index, and deterministic offline answer synthesizer.
 
 ## 🧪 Testing & Verification
 

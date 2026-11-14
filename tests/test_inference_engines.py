@@ -7,7 +7,9 @@ import httpx
 import pytest
 from openai import APIConnectionError
 
+from src.chunking.tokenizer import count_tokens
 from src.generation.engine import (
+    GeminiEngine,
     GroqEngine,
     OpenAICompatibleEngine,
     OpenRouterEngine,
@@ -94,6 +96,68 @@ def test_provider_adapters_keep_endpoints_and_openrouter_headers(monkeypatch):
     assert openrouter.is_configured()
     openrouter.generate("question", "system")
     assert calls["configuration"]["default_headers"] == openrouter.default_headers
+
+
+def test_retired_provider_model_ids_are_mapped_to_supported_models():
+    gemini = GeminiEngine(api_key="gemini-key", model_name="gemini-1.5-flash")
+    groq = GroqEngine(api_key="groq-key", model_name="llama-3.3-70b-versatile")
+
+    assert gemini.model_name == "gemini/gemini-3.5-flash-lite"
+    assert groq.model_name == "groq/openai/gpt-oss-120b"
+
+
+def test_gemini_api_key_is_sent_in_header_not_url(monkeypatch):
+    calls = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"candidates": [{"content": {"parts": [{"text": "answer"}]}}]}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def post(self, url, **kwargs):
+            calls["url"] = url
+            calls.update(kwargs)
+            return FakeResponse()
+
+    monkeypatch.setattr("httpx.Client", FakeClient)
+    engine = GeminiEngine(api_key="test-key", model_name="gemini-1.5-flash")
+
+    assert engine.generate("question", "system") == "answer"
+    assert "test-key" not in calls["url"]
+    assert calls["headers"] == {"x-goog-api-key": "test-key"}
+
+
+def test_openrouter_prompt_respects_model_context_window(monkeypatch):
+    calls = install_fake_langchain_openai(monkeypatch)
+    engine = OpenRouterEngine(api_key="router-key", model_name="router-model")
+    system_prompt = "Use only the supplied evidence."
+    prompt = "a!" * 170_000 + "\nUSER QUERY:\nWhat is the answer?"
+
+    engine.generate(prompt, system_prompt, max_tokens=64)
+
+    sent_prompt = calls["messages"][1].content
+    assert "USER QUERY:\nWhat is the answer?" in sent_prompt
+    assert (
+        count_tokens(sent_prompt)
+        + count_tokens(system_prompt)
+        + 64
+        + engine.context_safety_margin_tokens
+        <= engine.context_window_tokens
+    )
 
 
 def test_connection_errors_keep_actionable_provider_message(monkeypatch):

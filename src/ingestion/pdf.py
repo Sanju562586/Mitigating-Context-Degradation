@@ -93,7 +93,7 @@ class PDFParser(BaseParser):
                             _HEADING_REGEX.match(block_text)
                             or block_text.startswith("#")
                             or (
-                                len(block_text.splitlines()) == 1
+                                "\n" not in block_text
                                 and len(block_text) < 70
                                 and not block_text.endswith((".", "?", "!", ",", ";"))
                                 and not block_text.startswith(("•", "-", "*"))
@@ -110,6 +110,7 @@ class PDFParser(BaseParser):
                                 content=block_text,
                                 page_number=page_num,
                                 section_title=sec_title,
+                                char_count=len(block_text),
                                 metadata={
                                     "bbox": block[:4] if len(block) >= 4 else None,
                                     "block_number": block[5]

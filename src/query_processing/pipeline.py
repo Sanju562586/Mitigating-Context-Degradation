@@ -48,9 +48,14 @@ class QueryProcessor:
         # 4. Extract distinct keywords
         keywords = [w.lower() for w in search_query.split() if len(w) > 2]
 
+        # 5. Synthesize HyDE passage and multi-query expansions
+        hyde_passage = self.rewriter.generate_hyde_passage(search_query, intent=intent.value)
+        expanded_queries = self.rewriter.generate_query_expansions(search_query)
+
         metadata: dict[str, Any] = {
             "has_filters": bool(filters),
             "history_turns": len(conversation_history) if conversation_history else 0,
+            "has_hyde": bool(hyde_passage),
         }
 
         return ProcessedQuery(
@@ -61,6 +66,8 @@ class QueryProcessor:
             filters=filters,
             is_conversational=is_conversational,
             extracted_keywords=keywords,
+            hyde_passage=hyde_passage,
+            expanded_queries=expanded_queries,
             metadata=metadata,
         )
 

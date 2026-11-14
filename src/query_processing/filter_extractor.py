@@ -76,6 +76,22 @@ class FilterExtractor:
         """Derive an optimal search query representation based on extracted entities."""
         q = query.strip()
 
+        # Remove trailing document reference noise (e.g. "mentioned in the document", "in the text")
+        cleaned_doc_noise = re.sub(
+            r"\s+(?:mentioned\s+in|stated\s+in|listed\s+in|given\s+in|described\s+in|found\s+in)\s+(?:the\s+)?(?:document|doc|file|text|passage|paper|pdf|docx)s?$",
+            "",
+            q,
+            flags=re.IGNORECASE,
+        )
+        cleaned_doc_noise = re.sub(
+            r"\s+in\s+(?:the\s+)?(?:document|doc|file|text|passage|paper|pdf|docx)s?$",
+            "",
+            cleaned_doc_noise,
+            flags=re.IGNORECASE,
+        )
+        if cleaned_doc_noise.strip():
+            q = cleaned_doc_noise.strip()
+
         # Specific pattern: "What did the [YEAR] [DEPT] policy say about [TOPIC]?"
         # -> "[DEPT] [TOPIC] policy"
         m1 = re.match(
@@ -111,20 +127,6 @@ class FilterExtractor:
         # Remove years from search query if extracted
         if "year" in filters:
             q = re.sub(r"\b" + str(filters["year"]) + r"\b", "", q)
-
-        # Remove trailing document reference noise (e.g. "mentioned in the document", "in the text")
-        q = re.sub(
-            r"\s+(?:mentioned\s+in|stated\s+in|listed\s+in|given\s+in|described\s+in|found\s+in)\s+(?:the\s+)?(?:document|doc|file|text|passage|paper|pdf|docx)s?$",
-            "",
-            q,
-            flags=re.IGNORECASE,
-        )
-        q = re.sub(
-            r"\s+in\s+(?:the\s+)?(?:document|doc|file|text|passage|paper|pdf|docx)s?$",
-            "",
-            q,
-            flags=re.IGNORECASE,
-        )
 
         # Remove question conversational prefixes
         q = re.sub(

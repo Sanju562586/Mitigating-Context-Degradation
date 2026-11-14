@@ -13,9 +13,30 @@ from dotenv import load_dotenv
 from langchain_core.language_models.chat_models import BaseChatModel
 from openai import APIConnectionError, APIStatusError
 
+from src.chunking.tokenizer import count_tokens
+
 load_dotenv()
 
 logger = logging.getLogger("uvicorn.error")
+
+
+_GROQ_MODEL_ALIASES = {
+    "llama-3.3-70b-versatile": "openai/gpt-oss-120b",
+    "llama-3.1-70b-versatile": "openai/gpt-oss-120b",
+    "llama-3.1-8b-instant": "openai/gpt-oss-20b",
+    "llama3-70b-8192": "openai/gpt-oss-120b",
+    "llama3-8b-8192": "openai/gpt-oss-20b",
+}
+
+_GEMINI_MODEL_ALIASES = {
+    "gemini-1.5-flash": "gemini-3.5-flash-lite",
+    "gemini-1.5-flash-latest": "gemini-3.5-flash-lite",
+    "gemini-1.5-pro": "gemini-2.5-pro",
+    "gemini-2.0-flash": "gemini-3.5-flash-lite",
+    "gemini-2.0-flash-lite": "gemini-3.5-flash-lite",
+    "gemini-2.5-flash": "gemini-3.5-flash-lite",
+    "gemini-2.5-flash-lite": "gemini-3.5-flash-lite",
+}
 
 
 class BaseInferenceEngine(ABC):
@@ -145,36 +166,55 @@ class OfflineGroundedEngine(BaseInferenceEngine):
         for w in content_words:
             expanded_words.update(_SEMANTIC_SYNONYMS.get(w, set()))
 
-        scored_sentences: list[tuple[float, str, str]] = []
+        from src.context.sentence_pruner import SentencePruner
+
+        is_list_query = bool(
+            re.search(
+                r"\b(?:questions?|steps?|factors?|criteria|reasons?|items?|list|all|what are)\b",
+                query,
+                re.IGNORECASE,
+            )
+        )
+        max_sentences = 12 if is_list_query else 4
+
+        scored_sentences: list[tuple[float, int, str, str]] = []
+        sentence_seq = 0
         for tag, passage in passages:
-            # Split into individual sentences
-            sentences = re.split(r"(?<=[.!?])\s+", passage)
+            # Split into individual sentences preserving list items
+            sentences = SentencePruner.split_sentences(passage)
             for s in sentences:
                 s_clean = s.strip()
-                if not s_clean or len(s_clean) < 15:
+                if not s_clean or len(s_clean) < 10:
                     continue
                 s_words = set(re.findall(r"\b[a-zA-Z0-9_\-\.]{2,}\b", s_clean.lower()))
                 overlap = len(expanded_words & s_words)
                 score = overlap / (len(content_words) + 1e-5)
-                scored_sentences.append((score, s_clean, tag))
+                if is_list_query and SentencePruner._is_list_or_schedule_item(s_clean):
+                    score += 0.15
+                scored_sentences.append((score, sentence_seq, s_clean, tag))
+                sentence_seq += 1
 
         # Sort by relevance score descending
         scored_sentences.sort(key=lambda x: x[0], reverse=True)
 
         if not scored_sentences or scored_sentences[0][0] <= 0:
-            # If no direct term overlap, use the first high-salience sentence
-            top_sentences = scored_sentences[:2] if scored_sentences else []
+            # If no direct term overlap, use the first high-salience sentence in original sequence
+            top_sentences = (
+                sorted(scored_sentences[:2], key=lambda x: x[1])
+                if scored_sentences
+                else []
+            )
         else:
-            # Take top 2-3 most relevant unique sentences
-            top_sentences = []
+            selected: list[tuple[float, int, str, str]] = []
             seen = set()
-            for score, sent, tag in scored_sentences:
+            for score, seq, sent, tag in scored_sentences:
                 normalized = sent.lower()[:30]
                 if normalized not in seen and score > 0:
                     seen.add(normalized)
-                    top_sentences.append((score, sent, tag))
-                if len(top_sentences) >= 3:
+                    selected.append((score, seq, sent, tag))
+                if len(selected) >= max_sentences:
                     break
+            top_sentences = sorted(selected, key=lambda x: x[1])
 
         if not top_sentences:
             return "The retrieved context does not contain sufficient details to address the query."
@@ -184,7 +224,7 @@ class OfflineGroundedEngine(BaseInferenceEngine):
         )
         # Format answer statements with citation tags
         answer_parts = []
-        for _, sent, tag in top_sentences:
+        for _, _, sent, tag in top_sentences:
             sent_trimmed = sent.rstrip(". ")
             if is_plain_prompt:
                 answer_parts.append(f"{sent_trimmed}.")
@@ -215,6 +255,9 @@ class OpenAICompatibleEngine(BaseInferenceEngine):
     """LangChain client for OpenAI-compatible chat-completion APIs."""
 
     requires_api_key = False
+    context_window_tokens: int | None = None
+    context_safety_margin_tokens = 8192
+    _TRUNCATION_MARKER = "\n\n[... Context truncated to fit model context window ...]\n\n"
 
     def __init__(
         self,
@@ -241,6 +284,81 @@ class OpenAICompatibleEngine(BaseInferenceEngine):
     def is_configured(self) -> bool:
         return not self.requires_api_key or bool(self.api_key and self.api_key.strip())
 
+    def _truncate_prompt_by_chars(self, prompt: str, max_chars: int) -> str:
+        marker = self._TRUNCATION_MARKER
+        if len(prompt) <= max_chars:
+            return prompt
+
+        query_start = prompt.rfind("USER QUERY:")
+        suffix = prompt[query_start:] if query_start >= 0 else ""
+        if len(suffix) + len(marker) < max_chars:
+            prefix_limit = max_chars - len(suffix) - len(marker)
+            return prompt[:prefix_limit] + marker + suffix
+
+        return prompt[: max_chars - len(marker)] + marker
+
+    def _truncate_prompt_by_tokens(self, prompt: str, max_tokens: int) -> str:
+        marker = self._TRUNCATION_MARKER
+        query_start = prompt.rfind("USER QUERY:")
+        prefix = prompt[:query_start] if query_start >= 0 else prompt
+        suffix = prompt[query_start:] if query_start >= 0 else ""
+        suffix_budget = min(4096, max_tokens // 4)
+
+        if suffix and count_tokens(suffix) > suffix_budget:
+            query_header = "USER QUERY:"
+            query_body = suffix[len(query_header) :]
+            body_budget = max(0, suffix_budget - count_tokens(query_header))
+            left, right = 0, len(query_body)
+            while left < right:
+                middle = (left + right) // 2
+                if count_tokens(query_body[middle:]) <= body_budget:
+                    right = middle
+                else:
+                    left = middle + 1
+            suffix = query_header + query_body[left:]
+
+        left, right = 0, len(prefix)
+        while left < right:
+            middle = (left + right + 1) // 2
+            candidate = prefix[:middle] + marker + suffix
+            if count_tokens(candidate) <= max_tokens:
+                left = middle
+            else:
+                right = middle - 1
+
+        return prefix[:left] + marker + suffix
+
+    def _truncate_prompt_if_needed(
+        self,
+        prompt: str,
+        max_chars: int = 350_000,
+        system_prompt: str = "",
+        max_tokens: int = 1024,
+    ) -> str:
+        """Prevent character and provider token limits from rejecting large prompts."""
+        safe_prompt = self._truncate_prompt_by_chars(prompt, max_chars)
+        if len(safe_prompt) != len(prompt):
+            logger.warning(
+                f"[{self.name}] Prompt length ({len(prompt)} chars) exceeds safe threshold ({max_chars} chars). Truncating."
+            )
+
+        if self.context_window_tokens is not None:
+            available_prompt_tokens = (
+                self.context_window_tokens
+                - max_tokens
+                - count_tokens(system_prompt)
+                - self.context_safety_margin_tokens
+            )
+            if count_tokens(safe_prompt) > available_prompt_tokens:
+                logger.warning(
+                    f"[{self.name}] Prompt exceeds the {self.context_window_tokens}-token context window. Truncating."
+                )
+                safe_prompt = self._truncate_prompt_by_tokens(
+                    safe_prompt, max(0, available_prompt_tokens)
+                )
+
+        return safe_prompt
+
     def _raise_api_error(self, error: APIConnectionError | APIStatusError) -> NoReturn:
         if isinstance(error, APIConnectionError):
             raise RuntimeError(
@@ -251,6 +369,14 @@ class OpenAICompatibleEngine(BaseInferenceEngine):
             raise RuntimeError(
                 f"LLM API authorization failed (HTTP {error.status_code}) for model '{self._model_name}'. Configure a valid API key or switch to 'Offline (Deterministic)'."
             ) from error
+
+        if error.status_code == 400:
+            err_text = error.response.text[:300] if hasattr(error, "response") else str(error)
+            if any(term in err_text.lower() for term in ("context length", "too large", "maximum context", "tokens")):
+                raise RuntimeError(
+                    f"LLM context limit exceeded for model '{self._model_name}': {err_text}"
+                ) from error
+
         raise RuntimeError(
             f"LLM API error (HTTP {error.status_code}): {error.response.text[:200]}"
         ) from error
@@ -278,9 +404,12 @@ class OpenAICompatibleEngine(BaseInferenceEngine):
         """Generate a completion through LangChain's shared model interface."""
         from langchain_core.messages import HumanMessage, SystemMessage
 
+        safe_prompt = self._truncate_prompt_if_needed(
+            prompt, system_prompt=system_prompt, max_tokens=max_tokens
+        )
         try:
             response = self._chat_model(temperature, max_tokens).invoke(
-                [SystemMessage(content=system_prompt), HumanMessage(content=prompt)]
+                [SystemMessage(content=system_prompt), HumanMessage(content=safe_prompt)]
             )
         except (APIConnectionError, APIStatusError) as error:
             self._raise_api_error(error)
@@ -298,9 +427,12 @@ class OpenAICompatibleEngine(BaseInferenceEngine):
         """Stream completion chunks through the shared LangChain model interface."""
         from langchain_core.messages import HumanMessage, SystemMessage
 
+        safe_prompt = self._truncate_prompt_if_needed(
+            prompt, system_prompt=system_prompt, max_tokens=max_tokens
+        )
         messages = [
             SystemMessage(content=system_prompt),
-            HumanMessage(content=prompt),
+            HumanMessage(content=safe_prompt),
         ]
         try:
             for chunk in self._chat_model(temperature, max_tokens).stream(messages):
@@ -412,9 +544,10 @@ class GeminiEngine(BaseInferenceEngine):
         self.api_key = (
             api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY", "")
         )
-        self._model_name = model_name or os.getenv(
-            "GEMINI_MODEL_NAME", "gemini-1.5-flash"
+        raw_model = model_name or os.getenv(
+            "GEMINI_MODEL_NAME", "gemini-3.5-flash-lite"
         )
+        self._model_name = _GEMINI_MODEL_ALIASES.get(raw_model, raw_model)
 
     @property
     def model_name(self) -> str:
@@ -427,6 +560,18 @@ class GeminiEngine(BaseInferenceEngine):
     def is_configured(self) -> bool:
         return bool(self.api_key and self.api_key.strip())
 
+    def _truncate_prompt_if_needed(self, prompt: str, max_chars: int = 500_000) -> str:
+        """Prevent context length overflow on massive inputs."""
+        if len(prompt) > max_chars:
+            logger.warning(
+                f"[Gemini] Prompt length ({len(prompt)} chars) exceeds threshold ({max_chars} chars). Truncating."
+            )
+            return (
+                prompt[:max_chars]
+                + "\n\n[... Warning: Context truncated to fit model context window ...]"
+            )
+        return prompt
+
     def generate(
         self,
         prompt: str,
@@ -438,17 +583,25 @@ class GeminiEngine(BaseInferenceEngine):
             raise ValueError("GEMINI_API_KEY is not configured in .env.")
         import httpx
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self._model_name}:generateContent?key={self.api_key}"
+        safe_prompt = self._truncate_prompt_if_needed(prompt)
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self._model_name}:generateContent"
+        headers = {"x-goog-api-key": self.api_key}
         payload = {
             "system_instruction": {"parts": [{"text": system_prompt}]},
-            "contents": [{"parts": [{"text": prompt}]}],
+            "contents": [{"parts": [{"text": safe_prompt}]}],
             "generationConfig": {
                 "temperature": temperature,
                 "maxOutputTokens": max_tokens,
             },
         }
         with httpx.Client(timeout=45.0) as client:
-            resp = client.post(url, json=payload)
+            resp = client.post(url, headers=headers, json=payload)
+            if resp.status_code == 404 and self._model_name != "gemini-3.5-flash-lite":
+                logger.warning(
+                    f"[GeminiEngine] Model {self._model_name} returned 404. Falling back to gemini-3.5-flash-lite..."
+                )
+                url_fallback = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"
+                resp = client.post(url_fallback, headers=headers, json=payload)
             resp.raise_for_status()
             data = resp.json()
             candidates = data.get("candidates", [])
@@ -469,17 +622,41 @@ class GeminiEngine(BaseInferenceEngine):
 
         import httpx
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self._model_name}:streamGenerateContent?key={self.api_key}&alt=sse"
+        safe_prompt = self._truncate_prompt_if_needed(prompt)
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self._model_name}:streamGenerateContent?alt=sse"
+        headers = {"x-goog-api-key": self.api_key}
         payload = {
             "system_instruction": {"parts": [{"text": system_prompt}]},
-            "contents": [{"parts": [{"text": prompt}]}],
+            "contents": [{"parts": [{"text": safe_prompt}]}],
             "generationConfig": {
                 "temperature": temperature,
                 "maxOutputTokens": max_tokens,
             },
         }
         with httpx.Client(timeout=45.0) as client:
-            with client.stream("POST", url, json=payload) as response:
+            with client.stream("POST", url, headers=headers, json=payload) as response:
+                if response.status_code == 404 and self._model_name != "gemini-3.5-flash-lite":
+                    logger.warning(
+                        f"[GeminiEngine] Model {self._model_name} stream returned 404. Falling back to gemini-3.5-flash-lite..."
+                    )
+                    url_fallback = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:streamGenerateContent?alt=sse"
+                    with client.stream("POST", url_fallback, headers=headers, json=payload) as fb_resp:
+                        fb_resp.raise_for_status()
+                        for line in fb_resp.iter_lines():
+                            if not line or not line.startswith("data: "):
+                                continue
+                            try:
+                                data = json.loads(line[len("data: ") :].strip())
+                                candidates = data.get("candidates", [])
+                                if candidates and "content" in candidates[0]:
+                                    for part in candidates[0]["content"].get("parts", []):
+                                        text = part.get("text", "")
+                                        if text:
+                                            yield text
+                            except Exception:
+                                continue
+                    return
+
                 response.raise_for_status()
                 for line in response.iter_lines():
                     if not line:
@@ -503,17 +680,19 @@ class GroqEngine(OpenAICompatibleEngine):
     """Groq adapter using its OpenAI-compatible chat-completions API."""
 
     requires_api_key = True
+    context_window_tokens = 131_072
 
     def __init__(
         self,
         api_key: str | None = None,
         model_name: str | None = None,
     ) -> None:
+        raw_model = model_name or os.getenv("GROQ_MODEL_NAME", "openai/gpt-oss-120b")
+        resolved_model = _GROQ_MODEL_ALIASES.get(raw_model, raw_model)
         super().__init__(
             base_url="https://api.groq.com/openai/v1",
             api_key=api_key or os.getenv("GROQ_API_KEY", ""),
-            model_name=model_name
-            or os.getenv("GROQ_MODEL_NAME", "llama-3.3-70b-versatile"),
+            model_name=resolved_model,
         )
 
     @property
@@ -529,6 +708,7 @@ class OpenRouterEngine(OpenAICompatibleEngine):
     """OpenRouter adapter using its OpenAI-compatible chat-completions API."""
 
     requires_api_key = True
+    context_window_tokens = 131_072
 
     def __init__(
         self,
@@ -681,11 +861,17 @@ class FallbackInferenceEngine(BaseInferenceEngine):
                     prompt, system_prompt, temperature, max_tokens
                 )
                 first_token = next(token_iterator, None)
+                if first_token is None:
+                    logger.warning(
+                        f"[FallbackEngine] Stream with {engine.name} produced no tokens. Cascading..."
+                    )
+                    errors.append(f"{engine.name}: empty stream")
+                    continue
+
                 self._last_used_engine = engine
                 stream_started = True
 
-                if first_token is not None:
-                    yield first_token
+                yield first_token
                 for token in token_iterator:
                     yield token
                 return
