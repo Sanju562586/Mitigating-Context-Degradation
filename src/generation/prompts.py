@@ -29,7 +29,10 @@ class GroundedPromptSynthesizer:
         "(for example: '[Doc 1, Chunk 0][Doc 2, Chunk 1]').\n"
         "4. No External Knowledge: If the context contains partial information, state what is known "
         "with citations, and state clearly what cannot be determined from the evidence.\n"
-        "5. Concise & Objective: Keep your response direct, structured, and free of conversational filler."
+        "5. Concise & Objective: Keep your response direct, structured, and free of conversational filler.\n"
+        "6. Exhaustive List Completeness: When the user asks for questions, steps, factors, criteria, "
+        "rules, or enumerations, provide EVERY single item present in the evidence without omitting, "
+        "truncating, or selecting only a partial subset."
     )
 
     def __init__(self, system_prompt: str | None = None) -> None:

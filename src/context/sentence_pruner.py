@@ -90,6 +90,22 @@ _STOP_WORDS = {
     "does",
     "did",
     "doing",
+    "that",
+    "this",
+    "these",
+    "those",
+    "one",
+    "two",
+    "regarding",
+    "regard",
+    "regards",
+    "considered",
+    "considering",
+    "consider",
+    "considers",
+    "include",
+    "includes",
+    "including",
     "i",
     "me",
     "my",
@@ -265,6 +281,21 @@ _SENTENCE_SPLIT_REGEX = re.compile(
 )
 _WORD_REGEX = re.compile(r"\b[a-zA-Z0-9_\-\$]+\b")
 _FORMULA_MARKER_REGEX = re.compile(r"(?:[=≡≤≥×÷±∑∏<>]|\b(?:mod|gcd)\b)", re.IGNORECASE)
+_SUFFIXES = (
+    "ing",
+    "tion",
+    "ment",
+    "able",
+    "ness",
+    "ity",
+    "ed",
+    "ly",
+    "es",
+    "al",
+    "ure",
+    "ic",
+    "s",
+)
 
 
 class SentencePruner:
@@ -274,19 +305,54 @@ class SentencePruner:
         self.default_min_salience = default_min_salience
 
     @staticmethod
+    def _stem_word(w: str) -> str:
+        for suf in _SUFFIXES:
+            if w.endswith(suf) and len(w) > len(suf) + 3:
+                return w[: -len(suf)]
+        return w
+
+    @staticmethod
     def split_sentences(text: str) -> list[str]:
-        """Split text into individual sentences while preserving sentence content."""
+        """Split text into individual sentences while preserving sentence content and numbered lists."""
         if not text or not text.strip():
             return []
 
-        # First split on line breaks to preserve structural paragraphs
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
-        sentences: list[str] = []
+        # Rejoin solitary list markers on their own line with the following text line
+        text = re.sub(
+            r"(?m)^(\s*(?:\d+[\.\)]|\(\d+\)|\[\d+\]|[a-zA-Z][\.\)]|\([a-zA-Z]\)|[•\-\*]))\s*\n+\s*([A-Za-z0-9\"\'\(\[])",
+            r"\1 \2",
+            text,
+        )
 
-        for line in lines:
+        # Protect numbered list markers (e.g. "1. ", "12. ") from erroneous sentence splitting
+        protected = re.sub(r"\b(\d+)\.(\s+)", r"\1__LISTDOT__\2", text)
+
+        # First split on line breaks to preserve structural paragraphs
+        lines = [line.strip() for line in protected.splitlines() if line.strip()]
+
+        # Second pass to merge any remaining dangling list markers with the next line
+        merged_lines: list[str] = []
+        skip_next = False
+        for i, line in enumerate(lines):
+            if skip_next:
+                skip_next = False
+                continue
+            cleaned_line = line.replace("__LISTDOT__", ".").strip()
+            if i + 1 < len(lines) and re.match(
+                r"^(\d+[\.\)]|\(\d+\)|\[\d+\]|[a-zA-Z][\.\)]|\([a-zA-Z]\)|[•\-\*])$",
+                cleaned_line,
+            ):
+                next_line = lines[i + 1]
+                merged_lines.append(f"{cleaned_line}__LISTDOT__ {next_line}")
+                skip_next = True
+            else:
+                merged_lines.append(line)
+
+        sentences: list[str] = []
+        for line in merged_lines:
             parts = _SENTENCE_SPLIT_REGEX.split(line)
             for part in parts:
-                cleaned = part.strip()
+                cleaned = part.replace("__LISTDOT__", ".").strip()
                 if cleaned:
                     sentences.append(cleaned)
 
@@ -309,9 +375,9 @@ class SentencePruner:
         s = sentence.strip()
         if not s:
             return False
-        if s.startswith(("•", "-", "*", ">")):
+        if s.startswith(("•", "-", "*", ">", "–", "—", "+")):
             return True
-        if re.match(r"^(\d+[\.\)]|\(\d+\))\s+", s):
+        if re.match(r"^(\d+[\.\)]|\(\d+\)|\[\d+\]|[a-zA-Z][\.\)]|\([a-zA-Z]\))\s+", s):
             return True
         if re.search(r"\b(?:Admin|Dev|SME|Module|Superbadge|Project|Demo Link)\b$", s):
             return True
@@ -334,18 +400,29 @@ class SentencePruner:
         # Direct term overlap
         shared_terms = query_terms.intersection(sentence_terms)
 
-        # Semantic synonym & stem expansion check
-        if not shared_terms:
-            for qt in query_terms:
-                stem = qt.rstrip("s").rstrip("es")
-                syns = _SEMANTIC_SYNONYMS.get(qt, set()) | _SEMANTIC_SYNONYMS.get(
-                    stem, set()
-                )
-                matched_syns = syns.intersection(sentence_terms)
-                if matched_syns or any(
-                    st.startswith(stem) for st in sentence_terms if len(stem) >= 4
-                ):
+        # Semantic synonym & stem expansion check for remaining query terms
+        unmatched_query_terms = query_terms - shared_terms
+        for qt in unmatched_query_terms:
+            syns = _SEMANTIC_SYNONYMS.get(qt, set())
+            if syns.intersection(sentence_terms):
+                shared_terms.add(qt)
+                continue
+
+            qt_stem = self._stem_word(qt)
+            syns_stem = _SEMANTIC_SYNONYMS.get(qt_stem, set())
+            if syns_stem.intersection(sentence_terms):
+                shared_terms.add(qt)
+                continue
+
+            for st in sentence_terms:
+                st_stem = self._stem_word(st)
+                if qt_stem == st_stem:
                     shared_terms.add(qt)
+                    break
+                min_len = min(len(qt), len(st))
+                if min_len >= 5 and (qt[: min_len - 1] == st[: min_len - 1]):
+                    shared_terms.add(qt)
+                    break
 
         term_overlap = len(shared_terms) / max(len(query_terms), 1)
 
@@ -414,18 +491,35 @@ class SentencePruner:
             for sentence, score in scored_sentences
         )
 
-        kept: list[str] = [
-            sentence
-            for sentence, score in scored_sentences
-            if score >= threshold
-            or (has_relevant_context and self._is_formula_sentence(sentence))
-            or (has_schedule_context and self._is_list_or_schedule_item(sentence))
-            or (
-                has_relevant_context
-                and self._is_list_or_schedule_item(sentence)
-                and len(sentence.split()) <= 15
+        is_in_relevant_list = False
+        kept: list[str] = []
+
+        for sentence, score in scored_sentences:
+            is_list_item = self._is_list_or_schedule_item(sentence)
+
+            is_list_lead_in = bool(
+                re.search(
+                    r"(?:following|below|include|considers?|questions?|factors?|steps?):\s*$",
+                    sentence.strip(),
+                    re.IGNORECASE,
+                )
+                or (sentence.strip().endswith(":") and score >= threshold)
             )
-        ]
+
+            if is_list_lead_in and score >= threshold:
+                is_in_relevant_list = True
+
+            if not is_list_item and not is_list_lead_in:
+                is_in_relevant_list = False
+
+            if (
+                score >= threshold
+                or (has_relevant_context and self._is_formula_sentence(sentence))
+                or (has_schedule_context and is_list_item)
+                or (has_relevant_context and is_list_item)
+                or (is_in_relevant_list and is_list_item)
+            ):
+                kept.append(sentence)
 
         # Fallback preservation: If no sentence met threshold
         if not kept:
