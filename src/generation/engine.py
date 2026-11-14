@@ -13,6 +13,8 @@ from dotenv import load_dotenv
 from langchain_core.language_models.chat_models import BaseChatModel
 from openai import APIConnectionError, APIStatusError
 
+from src.chunking.tokenizer import count_tokens
+
 load_dotenv()
 
 logger = logging.getLogger("uvicorn.error")
@@ -28,7 +30,7 @@ _GROQ_MODEL_ALIASES = {
 
 _GEMINI_MODEL_ALIASES = {
     "gemini-1.5-flash": "gemini-3.5-flash-lite",
-    "gemini-1.5-flash-latest": "gemini-flash-lite-latest",
+    "gemini-1.5-flash-latest": "gemini-3.5-flash-lite",
     "gemini-1.5-pro": "gemini-2.5-pro",
     "gemini-2.0-flash": "gemini-3.5-flash-lite",
     "gemini-2.0-flash-lite": "gemini-3.5-flash-lite",
@@ -253,6 +255,9 @@ class OpenAICompatibleEngine(BaseInferenceEngine):
     """LangChain client for OpenAI-compatible chat-completion APIs."""
 
     requires_api_key = False
+    context_window_tokens: int | None = None
+    context_safety_margin_tokens = 8192
+    _TRUNCATION_MARKER = "\n\n[... Context truncated to fit model context window ...]\n\n"
 
     def __init__(
         self,
@@ -279,17 +284,80 @@ class OpenAICompatibleEngine(BaseInferenceEngine):
     def is_configured(self) -> bool:
         return not self.requires_api_key or bool(self.api_key and self.api_key.strip())
 
-    def _truncate_prompt_if_needed(self, prompt: str, max_chars: int = 350_000) -> str:
-        """Prevent HTTP 400 context length rejection on massive document inputs."""
-        if len(prompt) > max_chars:
+    def _truncate_prompt_by_chars(self, prompt: str, max_chars: int) -> str:
+        marker = self._TRUNCATION_MARKER
+        if len(prompt) <= max_chars:
+            return prompt
+
+        query_start = prompt.rfind("USER QUERY:")
+        suffix = prompt[query_start:] if query_start >= 0 else ""
+        if len(suffix) + len(marker) < max_chars:
+            prefix_limit = max_chars - len(suffix) - len(marker)
+            return prompt[:prefix_limit] + marker + suffix
+
+        return prompt[: max_chars - len(marker)] + marker
+
+    def _truncate_prompt_by_tokens(self, prompt: str, max_tokens: int) -> str:
+        marker = self._TRUNCATION_MARKER
+        query_start = prompt.rfind("USER QUERY:")
+        prefix = prompt[:query_start] if query_start >= 0 else prompt
+        suffix = prompt[query_start:] if query_start >= 0 else ""
+        suffix_budget = min(4096, max_tokens // 4)
+
+        if suffix and count_tokens(suffix) > suffix_budget:
+            query_header = "USER QUERY:"
+            query_body = suffix[len(query_header) :]
+            body_budget = max(0, suffix_budget - count_tokens(query_header))
+            left, right = 0, len(query_body)
+            while left < right:
+                middle = (left + right) // 2
+                if count_tokens(query_body[middle:]) <= body_budget:
+                    right = middle
+                else:
+                    left = middle + 1
+            suffix = query_header + query_body[left:]
+
+        left, right = 0, len(prefix)
+        while left < right:
+            middle = (left + right + 1) // 2
+            candidate = prefix[:middle] + marker + suffix
+            if count_tokens(candidate) <= max_tokens:
+                left = middle
+            else:
+                right = middle - 1
+
+        return prefix[:left] + marker + suffix
+
+    def _truncate_prompt_if_needed(
+        self,
+        prompt: str,
+        max_chars: int = 350_000,
+        system_prompt: str = "",
+        max_tokens: int = 1024,
+    ) -> str:
+        """Prevent character and provider token limits from rejecting large prompts."""
+        safe_prompt = self._truncate_prompt_by_chars(prompt, max_chars)
+        if len(safe_prompt) != len(prompt):
             logger.warning(
                 f"[{self.name}] Prompt length ({len(prompt)} chars) exceeds safe threshold ({max_chars} chars). Truncating."
             )
-            return (
-                prompt[:max_chars]
-                + "\n\n[... Warning: Context truncated to fit model context window ...]"
+
+        if self.context_window_tokens is not None:
+            available_prompt_tokens = (
+                self.context_window_tokens
+                - max_tokens
+                - count_tokens(system_prompt)
+                - self.context_safety_margin_tokens
             )
-        return prompt
+            if count_tokens(safe_prompt) > available_prompt_tokens:
+                logger.warning(
+                    f"[{self.name}] Prompt exceeds the {self.context_window_tokens}-token context window. Truncating."
+                )
+                safe_prompt = self._truncate_prompt_by_tokens(
+                    safe_prompt, max(0, available_prompt_tokens)
+                )
+
+        return safe_prompt
 
     def _raise_api_error(self, error: APIConnectionError | APIStatusError) -> NoReturn:
         if isinstance(error, APIConnectionError):
@@ -336,7 +404,9 @@ class OpenAICompatibleEngine(BaseInferenceEngine):
         """Generate a completion through LangChain's shared model interface."""
         from langchain_core.messages import HumanMessage, SystemMessage
 
-        safe_prompt = self._truncate_prompt_if_needed(prompt)
+        safe_prompt = self._truncate_prompt_if_needed(
+            prompt, system_prompt=system_prompt, max_tokens=max_tokens
+        )
         try:
             response = self._chat_model(temperature, max_tokens).invoke(
                 [SystemMessage(content=system_prompt), HumanMessage(content=safe_prompt)]
@@ -357,7 +427,9 @@ class OpenAICompatibleEngine(BaseInferenceEngine):
         """Stream completion chunks through the shared LangChain model interface."""
         from langchain_core.messages import HumanMessage, SystemMessage
 
-        safe_prompt = self._truncate_prompt_if_needed(prompt)
+        safe_prompt = self._truncate_prompt_if_needed(
+            prompt, system_prompt=system_prompt, max_tokens=max_tokens
+        )
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=safe_prompt),
@@ -512,7 +584,8 @@ class GeminiEngine(BaseInferenceEngine):
         import httpx
 
         safe_prompt = self._truncate_prompt_if_needed(prompt)
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self._model_name}:generateContent?key={self.api_key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self._model_name}:generateContent"
+        headers = {"x-goog-api-key": self.api_key}
         payload = {
             "system_instruction": {"parts": [{"text": system_prompt}]},
             "contents": [{"parts": [{"text": safe_prompt}]}],
@@ -522,13 +595,13 @@ class GeminiEngine(BaseInferenceEngine):
             },
         }
         with httpx.Client(timeout=45.0) as client:
-            resp = client.post(url, json=payload)
+            resp = client.post(url, headers=headers, json=payload)
             if resp.status_code == 404 and self._model_name != "gemini-3.5-flash-lite":
                 logger.warning(
                     f"[GeminiEngine] Model {self._model_name} returned 404. Falling back to gemini-3.5-flash-lite..."
                 )
-                url_fallback = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key={self.api_key}"
-                resp = client.post(url_fallback, json=payload)
+                url_fallback = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"
+                resp = client.post(url_fallback, headers=headers, json=payload)
             resp.raise_for_status()
             data = resp.json()
             candidates = data.get("candidates", [])
@@ -550,7 +623,8 @@ class GeminiEngine(BaseInferenceEngine):
         import httpx
 
         safe_prompt = self._truncate_prompt_if_needed(prompt)
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self._model_name}:streamGenerateContent?key={self.api_key}&alt=sse"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self._model_name}:streamGenerateContent?alt=sse"
+        headers = {"x-goog-api-key": self.api_key}
         payload = {
             "system_instruction": {"parts": [{"text": system_prompt}]},
             "contents": [{"parts": [{"text": safe_prompt}]}],
@@ -560,13 +634,13 @@ class GeminiEngine(BaseInferenceEngine):
             },
         }
         with httpx.Client(timeout=45.0) as client:
-            with client.stream("POST", url, json=payload) as response:
+            with client.stream("POST", url, headers=headers, json=payload) as response:
                 if response.status_code == 404 and self._model_name != "gemini-3.5-flash-lite":
                     logger.warning(
                         f"[GeminiEngine] Model {self._model_name} stream returned 404. Falling back to gemini-3.5-flash-lite..."
                     )
-                    url_fallback = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:streamGenerateContent?key={self.api_key}&alt=sse"
-                    with client.stream("POST", url_fallback, json=payload) as fb_resp:
+                    url_fallback = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:streamGenerateContent?alt=sse"
+                    with client.stream("POST", url_fallback, headers=headers, json=payload) as fb_resp:
                         fb_resp.raise_for_status()
                         for line in fb_resp.iter_lines():
                             if not line or not line.startswith("data: "):
@@ -606,6 +680,7 @@ class GroqEngine(OpenAICompatibleEngine):
     """Groq adapter using its OpenAI-compatible chat-completions API."""
 
     requires_api_key = True
+    context_window_tokens = 131_072
 
     def __init__(
         self,
@@ -633,6 +708,7 @@ class OpenRouterEngine(OpenAICompatibleEngine):
     """OpenRouter adapter using its OpenAI-compatible chat-completions API."""
 
     requires_api_key = True
+    context_window_tokens = 131_072
 
     def __init__(
         self,
