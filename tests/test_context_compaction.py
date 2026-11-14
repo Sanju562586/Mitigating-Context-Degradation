@@ -78,6 +78,28 @@ class TestSentencePruner:
         for i in range(1, 10):
             assert f"{i}." in compacted, f"Missing question item {i} in compacted text"
 
+    def test_detached_enumerated_list_preservation(self):
+        """Verify that numbered list items with line breaks between numbers and text (common in PDF extraction) are preserved."""
+        pruner = SentencePruner(default_min_salience=0.15)
+        query = "what are the fundamental questions that one should consider about system regarding architectural design decisions"
+        text = (
+            "Based on their knowledge and experience, they have to consider the following fundamental questions about the system:\n\n"
+            "1.\nIs there a generic application architecture that can act as a template for the system that is being designed?\n\n"
+            "2.\nHow will the system be distributed across a number of cores or processors?\n\n"
+            "3.\nWhat architectural patterns or styles might be used?\n\n"
+            "4.\nWhat will be the fundamental approach used to structure the system?\n\n"
+            "5.\nHow will the structural components in the system be decomposed into sub components?\n\n"
+            "6.\nWhat strategy will be used to control the operation of the components in the system?\n\n"
+            "7.\nWhat architectural organization is best for delivering the non-functional requirements of the system?\n\n"
+            "8.\nHow will the architectural design be evaluated?\n\n"
+            "9.\nHow should the architecture of the system be documented?"
+        )
+        compacted, kept = pruner.prune_chunk(query=query, text=text)
+        for i in range(1, 10):
+            assert f"{i}." in compacted, (
+                f"Missing detached question item {i} in compacted text"
+            )
+
 
 class TestContextDeduplicator:
     """Tests chunk seam overlap detection and Jaccard deduplication."""

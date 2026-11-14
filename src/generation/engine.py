@@ -145,36 +145,55 @@ class OfflineGroundedEngine(BaseInferenceEngine):
         for w in content_words:
             expanded_words.update(_SEMANTIC_SYNONYMS.get(w, set()))
 
-        scored_sentences: list[tuple[float, str, str]] = []
+        from src.context.sentence_pruner import SentencePruner
+
+        is_list_query = bool(
+            re.search(
+                r"\b(?:questions?|steps?|factors?|criteria|reasons?|items?|list|all|what are)\b",
+                query,
+                re.IGNORECASE,
+            )
+        )
+        max_sentences = 12 if is_list_query else 4
+
+        scored_sentences: list[tuple[float, int, str, str]] = []
+        sentence_seq = 0
         for tag, passage in passages:
-            # Split into individual sentences
-            sentences = re.split(r"(?<=[.!?])\s+", passage)
+            # Split into individual sentences preserving list items
+            sentences = SentencePruner.split_sentences(passage)
             for s in sentences:
                 s_clean = s.strip()
-                if not s_clean or len(s_clean) < 15:
+                if not s_clean or len(s_clean) < 10:
                     continue
                 s_words = set(re.findall(r"\b[a-zA-Z0-9_\-\.]{2,}\b", s_clean.lower()))
                 overlap = len(expanded_words & s_words)
                 score = overlap / (len(content_words) + 1e-5)
-                scored_sentences.append((score, s_clean, tag))
+                if is_list_query and SentencePruner._is_list_or_schedule_item(s_clean):
+                    score += 0.15
+                scored_sentences.append((score, sentence_seq, s_clean, tag))
+                sentence_seq += 1
 
         # Sort by relevance score descending
         scored_sentences.sort(key=lambda x: x[0], reverse=True)
 
         if not scored_sentences or scored_sentences[0][0] <= 0:
-            # If no direct term overlap, use the first high-salience sentence
-            top_sentences = scored_sentences[:2] if scored_sentences else []
+            # If no direct term overlap, use the first high-salience sentence in original sequence
+            top_sentences = (
+                sorted(scored_sentences[:2], key=lambda x: x[1])
+                if scored_sentences
+                else []
+            )
         else:
-            # Take top 2-3 most relevant unique sentences
-            top_sentences = []
+            selected: list[tuple[float, int, str, str]] = []
             seen = set()
-            for score, sent, tag in scored_sentences:
+            for score, seq, sent, tag in scored_sentences:
                 normalized = sent.lower()[:30]
                 if normalized not in seen and score > 0:
                     seen.add(normalized)
-                    top_sentences.append((score, sent, tag))
-                if len(top_sentences) >= 3:
+                    selected.append((score, seq, sent, tag))
+                if len(selected) >= max_sentences:
                     break
+            top_sentences = sorted(selected, key=lambda x: x[1])
 
         if not top_sentences:
             return "The retrieved context does not contain sufficient details to address the query."
@@ -184,7 +203,7 @@ class OfflineGroundedEngine(BaseInferenceEngine):
         )
         # Format answer statements with citation tags
         answer_parts = []
-        for _, sent, tag in top_sentences:
+        for _, _, sent, tag in top_sentences:
             sent_trimmed = sent.rstrip(". ")
             if is_plain_prompt:
                 answer_parts.append(f"{sent_trimmed}.")
