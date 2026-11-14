@@ -254,6 +254,13 @@ class GroundedGenerator:
         engine = EngineFactory.create_engine(provider) if provider else self.engine
 
         doc_context = (document_text or "").strip()
+        # Cap naive monolithic baseline text to safe LLM context budget (~75k tokens) to prevent API 400 overflows
+        max_naive_chars = 300_000
+        if len(doc_context) > max_naive_chars:
+            doc_context = (
+                doc_context[:max_naive_chars]
+                + "\n\n[... Remaining document text truncated to fit model context window ...]"
+            )
 
         if getattr(engine, "is_configured", lambda: True)():
             system_prompt = (

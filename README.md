@@ -77,9 +77,10 @@ The system architecture is structured into decoupled, high-performance layers ce
 - **LLM Inference ("Generate Response using Context")**:
   - OpenAI-compatible endpoints (OpenAI, Ollama, Groq, and OpenRouter) use a shared LangChain chat-model adapter for synchronous and streaming inference.
   - **Ollama**: Local, private on-device LLM execution (e.g., Llama 3.2, Mistral).
+  - **Groq**: Uses supported GPT-OSS models; legacy Llama model IDs are remapped.
   - **ChatGPT**: OpenAI API models (`gpt-4o`, `gpt-4o-mini`).
   - **Claude**: Anthropic API models (`claude-3-5-sonnet`, `claude-3-haiku`).
-  - **Gemini**: Google GenAI models (`gemini-1.5-pro`, `gemini-1.5-flash`).
+  - **Gemini**: Google GenAI models (default: `gemini-3.5-flash-lite`; legacy IDs are remapped).
   - **Offline Grounded Synthesizer**: High-speed, deterministic offline inference without external keys or network dependencies.
 
 ### 4. External Memory (Vector Database)
